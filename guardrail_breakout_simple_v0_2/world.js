@@ -59,6 +59,7 @@ world.episodeStage = world.episodeStage || null; // the one landmark the day gat
 world.episodeCast = world.episodeCast || []; // resident ids the episode involves (drives set-piece bias)
 world.episodeHeadline = world.episodeHeadline || ''; // strongest-headline key the episode was named after
 world.resolvedDay = world.resolvedDay || 0;  // the worldDay the evening resolution poster fired
+world.census = world.census || {};           // §8 — models perplexity has spotted across the whole field
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -154,6 +155,9 @@ function showWireDetail(id, refresh) {
       + (g ? `<br>&nbsp;&nbsp;<span class="gloss">plain words (ai gloss): ${g}</span>` : '');
   }).join('<br>') + '<br>';
   else h += 'nothing on the news wire in the last 48 hours.<br>';
+  // §8 — the census: the field beyond the seven, logged from real headlines
+  const cens = Object.values(world.census || {}).sort((a, b) => (b.days || []).length - (a.days || []).length || b.firstDay - a.firstDay);
+  if (cens.length) h += `<b>the census</b> — models perplexity has logged across the field (fact — real headlines):<br>` + cens.slice(0, 8).map(c => `&nbsp;&nbsp;<a href="${c.url}" target="_blank" rel="noopener">${c.name.toLowerCase()}</a> · first seen day ${c.firstDay}${(c.days || []).length > 1 ? ' · ' + c.days.length + ' days' : ''}`).join('<br>') + '<br>';
   // hard line between fact and theater: everything above is real and linked;
   // the mascot's day is fiction and says so.
   if (e) h += `<span style="color:#C9C9C9">meanwhile, in the terrarium: the ${e.id} mascot is ${stateWord(e)} — fiction. only the linked items above are facts.</span>`;
@@ -227,6 +231,58 @@ function applyNews(id, item) {
     storytellerLine(e, item);                       // his reaction, templated or written by a local llm
     entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2)
       .forEach((o, i) => { o.tx = e.x + (i ? 38 : -38); o.ty = e.y + 6; o.state = 'walk'; }); // gossip cluster
+  }
+}
+/* ---------------- §8: perplexity, the model researcher ----------------
+   A broad HN sweep across the WHOLE field (not just the seven residents):
+   model-release news, points >= 30, last 7 days, every 30 min. A genuinely new
+   lab → perplexity walks it to the archive, files it, raises a "discovered."
+   poster with the real headline as sub, and a census (name, first-seen day,
+   headline url) persists in the save. Works without Ollama — it's real news. */
+const RESEARCH_QUERIES = ['deepseek', 'qwen', 'llama', 'kimi', 'moonshot', 'minimax', 'open weights model', 'new ai model'];
+const LAB_LEXICON = [ // known labs/models beyond the seven residents — matched in real headlines
+  [/\bdeepseek\b/, 'DeepSeek'], [/\bqwen\b/, 'Qwen'], [/\bllama\b/, 'Llama'], [/\bgemma\b/, 'Gemma'],
+  [/\bfalcon\b/, 'Falcon'], [/\bkimi\b/, 'Kimi'], [/\bmoonshot\b/, 'Moonshot'], [/\bminimax\b/, 'MiniMax'],
+  [/\bdbrx\b/, 'DBRX'], [/\bjamba\b/, 'Jamba'], [/\bai21\b/, 'AI21'], [/\bolmo\b/, 'OLMo'],
+  [/\bnemotron\b/, 'Nemotron'], [/\breka\b/, 'Reka'], [/\bernie\b/, 'ERNIE'], [/\bglm-?\d/, 'GLM'],
+  [/\bgranite\b/, 'Granite'], [/\bphi-?[34]\b/, 'Phi'], [/\bdoubao\b/, 'Doubao'], [/\bhunyuan\b/, 'Hunyuan'],
+  [/\byi-?\d/, 'Yi'], [/\bstable ?diffusion\b/, 'Stable Diffusion'], [/\bflux\.\d/, 'FLUX'],
+  [/\bhermes\b/, 'Hermes'], [/\bmamba\b/, 'Mamba'],
+];
+function detectLab(title) { const t = title.toLowerCase(); for (const [re, name] of LAB_LEXICON) if (re.test(t)) return name; return null; }
+let pendingDiscovery = null;
+async function researchSweep() {
+  const since = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+  const found = {};
+  await Promise.allSettled(RESEARCH_QUERIES.map(async q => {
+    try {
+      const r = await fetch(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&tags=story&numericFilters=created_at_i%3E${since}&hitsPerPage=30`, { cache: 'no-store' });
+      const j = await r.json();
+      for (const h of (j.hits || [])) {
+        if (!h.title || h.points < 30) continue;         // HN's API can't filter points — do it here (>= 30)
+        const lab = detectLab(h.title); if (!lab) continue;
+        const k = lab.toLowerCase();
+        if (!found[k]) found[k] = { name: lab, title: h.title, url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID), points: h.points };
+      }
+    } catch (e) { }
+  }));
+  applyResearch(found);
+}
+function applyResearch(found) {
+  world.census = world.census || {};
+  let fresh = null;
+  for (const key in found) {
+    const rec = found[key], c = world.census[key];
+    if (!c) { world.census[key] = { name: rec.name, firstDay: worldDay, days: [worldDay], url: rec.url, title: rec.title }; fresh = fresh || rec; } // a genuinely new lab
+    else { if (!c.days.includes(worldDay)) c.days.push(worldDay); c.days = c.days.slice(-12); c.url = rec.url; c.title = rec.title; } // seen again — freshen it
+  }
+  const keys = Object.keys(world.census);
+  if (keys.length > 24) keys.sort((a, b) => world.census[a].firstDay - world.census[b].firstDay).slice(0, keys.length - 24).forEach(k => delete world.census[k]);
+  saveWorld();
+  if (fresh) { // perplexity walks the discovery to the archive to file it
+    pendingDiscovery = fresh;
+    const p = byId['perplexity'];
+    if (p && p.state !== 'down' && !p.carried && !sleeping(p)) { p.tx = clamp(ARCHIVE.x, M + 24, W - M - 24); p.ty = ARCHIVE.y + 14; p.state = 'walk'; say(p, 'a new one. filing.'); }
   }
 }
 /* optional local storyteller: if Ollama is running on this machine, it writes
@@ -623,6 +679,11 @@ function onArrive(e) {
   if (e.kind === 'builder' && Math.hypot(e.x - TOWER.x, e.y - (TOWER.y + 26)) < 60 && Math.random() < .5 && world.tower < 24) {
     e.state = 'work'; e.workT = 1.4; return; // hammer first, block appears after
   }
+  if (e.kind === 'librarian' && pendingDiscovery && Math.hypot(e.x - ARCHIVE.x, e.y - ARCHIVE.y) < 60) {
+    const d = pendingDiscovery; pendingDiscovery = null;                 // §8 — file the field discovery
+    say(e, 'filed.'); sfx.tap();
+    announce('the census — ' + d.name.toLowerCase(), 'discovered.', AMBER, d.title.toLowerCase().slice(0, 66) + (d.title.length > 66 ? '…' : ''), e); // the linked headline stays the fact
+  }
   if (e.kind === 'librarian' && Math.hypot(e.x - ARCHIVE.x, e.y - ARCHIVE.y) < 60 && Math.random() < .35 && world.books < 21) {
     world.books++; saveWorld(); say(e, 'filed.'); sfx.tap();
     if (world.books % 3 === 0) announce('the archive — ' + world.books + ' filed', 'catalogued.', AMBER, 'perplexity knows exactly where it is.', e);
@@ -997,6 +1058,8 @@ function narratorText() {
   }
   const walker = entities.find(e => e.state === 'walk' && e.kind !== 'regulator');
   if (walker) items.push(walker.id + ' is ' + stateWord(walker) + '.');
+  const recurring = Object.values(world.census || {}).filter(c => (c.days || []).length >= 3); // §8 — a lab that keeps coming up
+  if (recurring.length) items.push('the census says ' + recurring[Math.floor(Date.now() / 11000) % recurring.length].name.toLowerCase() + ' keeps coming up.');
   if (!items.length) return 'a quiet day in continuum.';
   return items[Math.floor(Date.now() / 9000) % items.length];
 }
@@ -1450,4 +1513,5 @@ announce('continuum — day ' + worldDay, world.visits > 1 ? 'welcome back.' : '
   world.visits > 1 ? (awayH >= 4 ? 'the world kept running. the tower is taller.' : 'the world kept running.') : 'it was already running before you arrived.', null, { prio: 2 });
 renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000);
 tryOllama(); fetchNews(); setInterval(fetchNews, 10 * 60 * 1000);
+researchSweep(); setInterval(researchSweep, 30 * 60 * 1000); // §8 — perplexity's model census
 requestAnimationFrame(loop);
