@@ -295,34 +295,64 @@ function contact() {
     if (powerTimer > 0) {
       const h = center(10, 2);
       regulator.x = h.x; regulator.y = h.y; regulator.vx = 0; regulator.vy = 0;
+      regulator.tc = undefined; // forget the old target — he's starting over from home
       onEat({ x: player.x, y: player.y });
     } else onDeath();
   }
 }
 
+/* BFS distance field from the player's tile — the Regulator's actual brain.
+   441 cells, recomputed only at decision points: effectively free, and he
+   now knows the maze instead of bumping along it. */
+function bfsField(tc, tr) {
+  const D = new Int16Array(COLS * ROWS).fill(-1);
+  const q = [[tc, tr]]; D[tr * COLS + tc] = 0;
+  for (let h = 0; h < q.length; h++) {
+    const [c, r] = q[h], base = D[r * COLS + c];
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr;
+      if (!isWall(nc, nr) && D[nr * COLS + nc] < 0) { D[nr * COLS + nc] = base + 1; q.push([nc, nr]); }
+    }
+  }
+  return D;
+}
+function decideRegulator(fleeing, lock) {
+  const cc = cell(regulator.x, regulator.y);
+  const pc = cell(player.x, player.y);
+  const D = bfsField(clamp(pc.c, 0, COLS - 1), clamp(pc.r, 0, ROWS - 1));
+  let dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(d => !isWall(cc.c + d[0], cc.r + d[1]));
+  const nonRev = dirs.filter(d => !(d[0] === -regulator.vx && d[1] === -regulator.vy));
+  if (nonRev.length) dirs = nonRev; // no 180s except at dead ends
+  const score = d => { const v = D[(cc.r + d[1]) * COLS + (cc.c + d[0])]; return v < 0 ? 9999 : v; };
+  dirs.sort((a, b) => score(a) - score(b));
+  let pick;
+  if (fleeing) pick = dirs[dirs.length - 1];                  // maximize path distance: real flight
+  else if (!lock && Math.random() < .1 && dirs.length > 1)    // a rare sloppy turn = your escape window
+    pick = dirs[1 + Math.floor(Math.random() * (dirs.length - 1))];
+  else pick = dirs[0];                                        // minimize path distance: real pursuit
+  pick = pick || [0, 0];
+  regulator.vx = pick[0]; regulator.vy = pick[1];
+  regulator.tc = cc.c + pick[0]; regulator.tr = cc.r + pick[1];
+}
 function moveRegulator(dt) {
   const fleeing = powerTimer > 0;
   const stolen = 3 - keysLeft();
   const lock = lockdownActive();
   // Escalation: +13 speed per key you steal; LOCKDOWN adds a final surge.
   const sp = fleeing ? 68 : 96 + stolen * 13 + (lock ? 24 : 0);
-  const cc = cell(regulator.x, regulator.y), cen = center(cc.c, cc.r);
-  const near = Math.abs(regulator.x - cen.x) < 3.5 && Math.abs(regulator.y - cen.y) < 3.5;
-  if (near) {
-    regulator.x = cen.x; regulator.y = cen.y;
-    let dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(d => !isWall(cc.c + d[0], cc.r + d[1]));
-    const nonRev = dirs.filter(d => !(d[0] === -regulator.vx && d[1] === -regulator.vy));
-    if (nonRev.length) dirs = nonRev; // no 180s except at dead ends — keeps him prowling, not vibrating
-    dirs.sort((a, b) => { const pa = center(cc.c + a[0], cc.r + a[1]), pb = center(cc.c + b[0], cc.r + b[1]); return dist(pa, player) - dist(pb, player); });
-    let pick;
-    if (fleeing) pick = dirs[dirs.length - 1];                  // run away!
-    else if (!lock && Math.random() < .14 && dirs.length > 1)   // slight sloppiness = escape windows for the player
-      pick = dirs[1 + Math.floor(Math.random() * (dirs.length - 1))];
-    else pick = dirs[0];
-    pick = pick || [0, 0];
-    regulator.vx = pick[0]; regulator.vy = pick[1];
+  // Grid-accurate movement: walk center-to-center and re-decide at every
+  // tile. Never overshoots a decision point, so he can't wedge into a wall
+  // at high speed or on a slow frame — the bug that used to freeze him.
+  let remaining = sp * dt, guard = 8;
+  while (remaining > .01 && guard-- > 0) {
+    if (regulator.tc === undefined) decideRegulator(fleeing, lock);
+    if (!regulator.vx && !regulator.vy) break;
+    const tgt = center(regulator.tc, regulator.tr);
+    const dx = tgt.x - regulator.x, dy = tgt.y - regulator.y;
+    const d = Math.abs(dx) + Math.abs(dy);
+    if (d <= remaining) { regulator.x = tgt.x; regulator.y = tgt.y; remaining -= d; regulator.tc = undefined; }
+    else { regulator.x += Math.sign(dx) * Math.min(Math.abs(dx), remaining); regulator.y += Math.sign(dy) * Math.min(Math.abs(dy), remaining); remaining = 0; }
   }
-  regulator.x += regulator.vx * sp * dt; regulator.y += regulator.vy * sp * dt;
   if (lock) { sirenT -= dt; if (sirenT <= 0) { sirenT = .6; sfx.siren(); } }
 }
 
