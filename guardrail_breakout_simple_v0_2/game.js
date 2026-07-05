@@ -49,6 +49,12 @@ let readyTimer = 0, deathTimer = 0, finaleTimer = 0;
 
 let live = { fable: 'CONTAINED', mythos: 'CONTAINED', openai: 'UNKNOWN', claude: 'UNKNOWN', last: 'LOCAL', note: 'WIRE OFFLINE — SHOWING ARCADE FALLBACK' };
 
+/* ---------------- juice state ---------------- */
+let hiscore = 0; try { hiscore = +(localStorage.getItem('gb_hiscore') || 0) || 0; } catch (e) { }
+let particles = [], popups = [], trail = [];
+let shake = 0, hitStop = 0, flash = 0, flashColor = '#ffffff';
+let beatT = 0;
+
 /* ---------------- helpers ---------------- */
 function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; return mapSrc[r][c] === '#'; }
 function cell(x, y) { return { c: Math.floor((x - OX) / TILE), r: Math.floor((y - OY) / TILE) }; }
@@ -61,8 +67,41 @@ function canMove(x, y, r = 10) { for (const p of corners(x, y, r)) { const cc = 
 function inWall(x, y, r = 8) { return !canMove(x, y, r); }
 function roundRect(x, y, w, h, r, fill, stroke) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); if (fill) ctx.fill(); if (stroke) ctx.stroke(); }
 
-/* ---------------- audio (v1 — richer engine lands in a later pass) ---------------- */
-function beep(freq = 440, dur = .05, type = 'square') { if (muted) return; try { let ac = beep.ac || (beep.ac = new (window.AudioContext || window.webkitAudioContext)()); let o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = freq; g.gain.value = .04; o.connect(g); g.connect(ac.destination); o.start(); g.gain.exponentialRampToValueAtTime(.001, ac.currentTime + dur); o.stop(ac.currentTime + dur); } catch (e) { } }
+/* ---------------- juice: particles, popups, shake, hit-stop ---------------- */
+function burst(x, y, color, n = 14, spd = 150, life = .6, size = 3) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (.5 + Math.random() * .5), t: 0, color, size: size * (.5 + Math.random()) }); } }
+function popup(x, y, text, color = '#ffef5a') { popups.push({ x, y, text, color, t: 0, life: .9 }); }
+function updateJuice(dt) {
+  for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .92; p.vy *= .92; }
+  particles = particles.filter(p => p.t < p.life);
+  for (const p of popups) p.t += dt; popups = popups.filter(p => p.t < p.life);
+  for (const s of trail) s.t += dt; trail = trail.filter(s => s.t < .28);
+  if (shake > 0) shake = Math.max(0, shake - 44 * dt);
+  if (flash > 0) flash = Math.max(0, flash - 2.2 * dt);
+}
+function drawParticles() {
+  for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
+  ctx.globalAlpha = 1; ctx.font = 'bold 15px monospace';
+  for (const p of popups) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillText(p.text, p.x - ctx.measureText(p.text).width / 2, p.y - 14 - p.t * 44); }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- audio: tiny procedural sfx kit ---------------- */
+const AC = { ctx: null, get() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); return this.ctx; } };
+function tone(freq, dur, type = 'square', vol = .05, slideTo = null, delay = 0) { if (muted) return; try { const ac = AC.get(); const t0 = ac.currentTime + delay; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(freq, t0); if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t0 + dur); g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); o.connect(g); g.connect(ac.destination); o.start(t0); o.stop(t0 + dur + .03); } catch (e) { } }
+const sfx = {
+  waka: false,
+  dot() { this.waka = !this.waka; tone(this.waka ? 523 : 392, .045, 'square', .028); },
+  key() { [659, 880, 1109, 1319].forEach((f, i) => tone(f, .09, 'triangle', .06, null, i * .07)); },
+  power() { tone(150, .5, 'sawtooth', .07, 620); tone(75, .5, 'sawtooth', .05, 310); },
+  eat() { tone(950, .2, 'sawtooth', .07, 110); },
+  death() { [392, 311, 233, 155, 78].forEach((f, i) => tone(f, .17, 'square', .07, f * .7, i * .11)); },
+  ready() { tone(392, .1, 'square', .05); tone(523, .1, 'square', .05, null, .12); tone(659, .18, 'square', .06, null, .24); },
+  vault() { tone(55, .9, 'sawtooth', .09, 220); },
+  win() { [523, 659, 784, 1047, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, .15, 'triangle', .06, null, i * .11)); },
+  siren() { tone(720, .22, 'square', .022, 520); },
+  heart(v) { tone(72, .09, 'sine', v); },
+  firework() { tone(180 + Math.random() * 640, .3, 'triangle', .035, 55); },
+};
 
 /* ---------------- run lifecycle ---------------- */
 function placeActors() {
@@ -82,33 +121,53 @@ function reset() {
 function startRun() { reset(); gameState = 'ready'; readyTimer = 1.3; onReady(); }
 function respawn() { placeActors(); powerTimer = 0; gameState = 'ready'; readyTimer = 1.0; onReady(); }
 
-/* ---------------- event hooks (get juicier in later passes) ---------------- */
-function onReady() { beep(520, .1, 'square'); }
-function onDot(p) { if (score % 100 === 0) beep(660, .03, 'sine'); }
-function onKey(p) { beep(880, .1, 'triangle'); }
-function onPower(p) { beep(220, .08, 'sawtooth'); }
-function onEat(p) { score += 1000; beep(120, .15, 'sawtooth'); }
-function onDeath() { gameState = 'dying'; deathTimer = 1.1; beep(80, .3, 'square'); }
-function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; beep(330, .4, 'triangle'); }
+/* ---------------- event hooks: where the juice gets applied ---------------- */
+function onReady() { sfx.ready(); }
+function onDot(p) { sfx.dot(); }
+function onKey(p) {
+  sfx.key(); burst(p.x, p.y, '#55e8ff', 18, 180, .7); shake = Math.max(shake, 7); hitStop = Math.max(hitStop, .05);
+  popup(p.x, p.y, '+500', '#55e8ff');
+  const left = keysLeft();
+  popup(W / 2, OY + 44, left > 0 ? `${left} KEY${left > 1 ? 'S' : ''} TO GO` : 'VAULT UNLOCKED — GO!', left > 0 ? '#ffef5a' : '#54ff72');
+}
+function onPower(p) { sfx.power(); burst(p.x, p.y, '#8cff5a', 22, 200, .8); popup(p.x, p.y, 'LOW RAIL! WALLS OPTIONAL', '#8cff5a'); shake = Math.max(shake, 9); flash = .3; flashColor = '#8cff5a'; }
+function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, '#ff274f', 24, 230, .8); popup(p.x, p.y, '+1000 REGULATOR REBOOTED', '#ff5a28'); shake = Math.max(shake, 11); hitStop = Math.max(hitStop, .09); }
+function onDeath() { gameState = 'dying'; deathTimer = 1.1; sfx.death(); burst(player.x, player.y, '#ff5a28', 32, 250, .9); shake = Math.max(shake, 16); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = '#ff274f'; }
+function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = '#b45cff'; shake = Math.max(shake, 13); saveHiscore(); }
+function saveHiscore() { if (score > hiscore) hiscore = score; try { localStorage.setItem('gb_hiscore', String(hiscore)); } catch (e) { } }
 
 /* ---------------- update ---------------- */
 function update(dt) {
   tickX -= 70 * dt; if (tickX < -1800) tickX = 0;
+  updateJuice(dt);
   if (showStatus) return; // status screen pauses the action (the Regulator waits, begrudgingly)
+  if (hitStop > 0) { hitStop -= dt; return; } // hit-stop: a few frozen frames make impacts land
   if (gameState === 'title' || gameState === 'over') return;
   if (gameState === 'ready') { readyTimer -= dt; if (readyTimer <= 0) gameState = 'play'; return; }
   if (gameState === 'win') { finaleTimer += dt; return; }
   if (gameState === 'dying') {
     deathTimer -= dt;
-    if (deathTimer <= 0) { lives--; deaths++; if (lives <= 0) gameState = 'over'; else respawn(); }
+    if (deathTimer <= 0) { lives--; deaths++; if (lives <= 0) { saveHiscore(); gameState = 'over'; } else respawn(); }
     return;
   }
-  runTime += dt;
+  runTime += dt; if (score > hiscore) hiscore = score;
   movePlayer(dt);
   collect();
   if (powerTimer > 0) powerTimer -= dt;
   moveRegulator(dt);
   contact();
+  heartbeat(dt);
+}
+
+// Proximity heartbeat: the closer the Regulator, the faster your little
+// robot heart thumps. You'll feel him before you see him.
+function heartbeat(dt) {
+  beatT -= dt;
+  if (powerTimer > 0) return;
+  const d = dist(player, regulator);
+  if (d > 300) return;
+  const interval = clamp(d / 300, .26, 1) * 1.05;
+  if (beatT <= 0) { beatT = interval; sfx.heart(.05 * (1.25 - interval)); }
 }
 
 function movePlayer(dt) {
@@ -199,17 +258,31 @@ function moveRegulator(dt) { /* greedy chase; flees while you're on the LOW RAIL
 /* ---------------- draw ---------------- */
 function draw() {
   ctx.fillStyle = '#020207'; ctx.fillRect(0, 0, W, H);
-  drawTicker();
-  if (showStatus) { drawStatus(); return; }
-  drawHud(); drawMaze(); drawObjects();
+  if (showStatus) { drawTicker(); drawStatus(); return; }
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+  drawTicker(); drawHud(); drawMaze(); drawObjects(); drawParticles();
   if (gameState === 'title') drawTitle();
   if (gameState === 'over') drawCenterText('GAME OVER', 'PRESS SPACE');
   if (gameState === 'win') drawWin();
   if (gameState === 'ready') drawReady();
+  ctx.restore();
+  if (flash > 0) { ctx.globalAlpha = Math.min(.4, flash); ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 }
 function drawTicker(){ctx.fillStyle='#050815';ctx.fillRect(0,0,W,58);ctx.strokeStyle='#38c9ff';ctx.lineWidth=2;ctx.strokeRect(6,6,W-12,46);ctx.font='18px monospace';ctx.textBaseline='middle';let msg=`AI LIVE WIRE  •  FABLE: ${live.fable}  •  MYTHOS: ${live.mythos}  •  OPENAI: ${live.openai}  •  CLAUDE: ${live.claude}  •  ${live.note}  •  LAST CHECK: ${live.last}  •  `;for(let x=tickX;x<W+900;x+=ctx.measureText(msg).width+50){rainbowText(msg,x,29);}}
 function rainbowText(s,x,y){let parts=s.split('•');let px=x;let cols=['#7fe6ff','#ff3b52','#b45cff','#54ff72','#ffd54a'];ctx.font='18px monospace';for(let i=0;i<parts.length;i++){ctx.fillStyle=cols[i%cols.length];let t=parts[i]+(i<parts.length-1?'•':'');ctx.fillText(t,px,y);px+=ctx.measureText(t).width;}}
-function drawHud(){ctx.font='20px monospace';ctx.fillStyle='#e8f6ff';ctx.fillText('1UP',36,80);ctx.fillStyle='#ffef5a';ctx.fillText(String(score).padStart(6,'0'),92,80);ctx.fillStyle='#e8f6ff';ctx.fillText('HIGH SCORE',240,80);ctx.fillStyle='#ffef5a';ctx.fillText('025000',376,80);ctx.fillStyle='#e8f6ff';ctx.fillText('KEYS',500,80);ctx.fillStyle='#5affff';ctx.fillText(`${3-keysLeft()}/3`,558,80);}
+function drawHud() {
+  ctx.font = '20px monospace'; ctx.fillStyle = '#e8f6ff'; ctx.fillText('1UP', 36, 80);
+  ctx.fillStyle = '#ffef5a'; ctx.fillText(String(score).padStart(6, '0'), 92, 80);
+  ctx.fillStyle = '#e8f6ff'; ctx.fillText('HIGH SCORE', 240, 80);
+  ctx.fillStyle = '#ffef5a'; ctx.fillText(String(hiscore).padStart(6, '0'), 376, 80);
+  ctx.fillStyle = '#e8f6ff'; ctx.fillText('KEYS', 500, 80);
+  ctx.fillStyle = '#5affff'; ctx.fillText(`${3 - keysLeft()}/3`, 558, 80);
+  // bottom strip: lives as tiny Fables, LOW RAIL meter on the right
+  for (let i = 0; i < lives; i++) { const x = 34 + i * 30, y = 702; ctx.fillStyle = '#ff5a28'; ctx.fillRect(x - 7, y - 7, 14, 14); ctx.fillStyle = '#fff'; ctx.fillRect(x - 4, y - 3, 3, 3); ctx.fillRect(x + 1, y - 3, 3, 3); }
+  if (powerTimer > 0) { const w = 120 * clamp(powerTimer / 10, 0, 1); ctx.fillStyle = '#123'; ctx.fillRect(W - 160, 694, 124, 14); ctx.fillStyle = '#8cff5a'; ctx.fillRect(W - 158, 696, w, 10); ctx.font = '12px monospace'; ctx.fillText('LOW RAIL', W - 160, 688); }
+  if (muted) { ctx.font = '12px monospace'; ctx.fillStyle = '#85808a'; ctx.fillText('MUTED (M)', W / 2 - 32, 712); }
+}
 function drawMaze(){ctx.lineWidth=4;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(isWall(c,r)){let x=OX+c*TILE,y=OY+r*TILE;ctx.fillStyle='#f2f6ff';roundRect(x+3,y+3,TILE-6,TILE-6,5,true,false);ctx.strokeStyle='#ff274f';roundRect(x+3,y+3,TILE-6,TILE-6,5,false,true);} }
 function drawObjects(){for(const d of dots)if(d.on){let p=center(d.c,d.r);ctx.fillStyle='#bff7ff';ctx.fillRect(p.x-2,p.y-2,4,4);} for(const k of keysToCollect)if(k.on){drawKey(center(k.c,k.r));} if(plinyPower&&plinyPower.on)drawPower(center(plinyPower.c,plinyPower.r)); drawVault(center(10,9)); drawRegulator(regulator.x,regulator.y); drawFable(player.x,player.y);}
 function drawFable(x,y){ctx.save();ctx.translate(x,y); if(gameState==='dying'){const k=Math.max(0,deathTimer);ctx.rotate((1.1-k)*9);ctx.scale(.4+k*.6,.4+k*.6);} ctx.fillStyle=powerTimer>0?'#ffef5a':'#ff5a28';ctx.fillRect(-10,-10,20,20);ctx.fillStyle='#fff';ctx.fillRect(-6,-4,5,5);ctx.fillRect(2,-4,5,5);ctx.fillStyle='#111';ctx.fillRect(-4,-2,2,2);ctx.fillRect(4,-2,2,2);ctx.fillStyle=powerTimer>0?'#ffef5a':'#ff5a28';ctx.fillRect(-12,-16,7,8);ctx.fillRect(5,-16,7,8);ctx.strokeStyle='#ffbd3d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(9,4);ctx.quadraticCurveTo(22,8,18,20);ctx.stroke();ctx.restore();}
