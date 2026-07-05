@@ -96,3 +96,74 @@ together. Fix: a day is one serialized episode with acts, staged on the world's 
   runs the world at 30× so a whole episode can be previewed in ~2 minutes.
 - **Pacing law (already shipped in the calm pass — do not regress):** stillness is the default;
   stage manager caps simultaneous walkers at 2 (beats, directives, and the regulator exempt).
+
+## §6 review rulings (Fable, Jul 5) — for the executing session
+
+1. **Resolution poster:** hybrid. The engine keeps the hard guarantee (fires exactly once, kicker
+   `day N — <episode>`), but the director gets first authorship: on the evening tick it may supply
+   the resolution poster's word/tone/sub through the normal contract; engine validates; missing or
+   invalid → deterministic fallback (`curtain.` / violet / sub = arc). A fixed nightly "curtain."
+   would become the new vault-7 loop. Small change — make it.
+2. **Model:** 32b stays the default. Latency is backstage by design; entertainment is the product.
+3. **Quiet-day fallback:** approved as built; rotate the 5 titles by `worldDay` so consecutive
+   quiet days never repeat a title.
+4. **Pinned line styling:** approved as-is (10px, faint, lowercase). If Bill reports squinting,
+   bump color FAINT → MUT; nothing else.
+- Both minor reads approved: no re-titling at the curtain; Mythos exempt from set-piece bias (canon).
+
+## 7. v1.2 — Fear, avoidance, and a nosier Regulator [Bill, Jul 5]
+
+Engine-level (always on, director can amplify but never causes it):
+- Every resident gets a **nervousness score** (0–1): base by personality (grok low, perplexity
+  high) + **news-driven**: trouble-class headline about your model → +0.5 for the day; regulator
+  currently inspecting you → +0.3; decays hourly.
+- **Purposeful avoidance:** pickTarget rejects destinations within ~90px of the regulator's
+  position/heading (nervousness-scaled); if he approaches within 70px, nervous residents edge away
+  first (small sidesteps), then scurry at 50px — comedy beats: frozen mid-step "act natural" pose,
+  a too-casual whistle pixel-note, hiding behind their own landmark and peeking.
+- **Regulator becomes nosy, not just sweeping:** between sweeps he *probes* — walks up to a
+  resident, leans in (tilt), circles them once slowly, jots on the clipboard ("noted."), moves on.
+  High-nervousness targets preferred (he can smell it). Fable still never caught; grok actively
+  photobombs inspections (canon comedy).
+- Hover caption reflects it: "perplexity · acting natural · wire: running clean".
+
+## 8. v1.2 — The model researcher [Bill, Jul 5]
+
+- **Perplexity gets the job** (librarian → researcher, canon-consistent). A broad HN sweep
+  (queries like "new model", "open weights", "releases", points ≥ 30, 7-day window, every 30 min)
+  looks for model-release news across the WHOLE field — not just the seven residents.
+- New find → perplexity walks it to the archive, files it, poster `discovered.` (amber) with the
+  real headline as sub; a **census** list persists in the save (`world.census`: name, first-seen
+  day, headline url). The wire detail panel gains a "census" section listing discoveries.
+- If a discovered lab recurs across ≥3 different days, the narrator may note "the census says
+  <name> keeps coming up." (Future: candidate for a visiting mascot — spec only, don't build.)
+
+## 9. v1.2 — Local wire relay (status pages the browser can't read) [Bill, Jul 5]
+
+- Upgrade `run_local_server.command`/`.sh` from `python3 -m http.server` to a ~40-line stdlib
+  Python server (still zero third-party deps) that serves the folder AND exposes
+  `GET /relay?u=<allowlisted-url>`: fetches server-side with a browser UA, returns body with
+  `Access-Control-Allow-Origin: *`. **Hard allowlist** (status.mistral.ai, status.x.ai,
+  status.deepseek.com summary endpoints only), 15s timeout, no query passthrough beyond `u`.
+- `fetchWire` gains a relay fallback: direct fetch fails → try `/relay?u=…` → parse as statuspage.
+  Works only when served locally (the terrarium's own tool checking the pages, as Bill asked);
+  on GitHub Pages/file:// it degrades to today's "human page only" links. x.ai may still refuse
+  (Cloudflare) — keep the honest fallback. Footer chip tone/word update accordingly, and the
+  detail panel says "via local relay" so the source is transparent.
+
+## 10. v2.0 — The evidence generator (Continuum reasoning project) [Bill, Jul 5 — DISCUSS THEN BUILD]
+
+The terrarium is already a longitudinal continuity instrument: real-world inputs (wire, news),
+a persistent memory (arcs, episodes, census), and a local LLM making serialized decisions across
+days. Formalizing that:
+- **The journal:** every director exchange appended to a JSONL log (input-state digest, raw output,
+  validated beats, episode/act, callbacks made) in localStorage + a "download journal" link
+  (theater-layer footer). This is the raw evidence stream.
+- **Continuity checks (judge pass):** once per evening, a second local-model call grades the day:
+  did the morning callback actually match yesterday's arcLog? did any beat contradict the episode?
+  score + one-line judgment appended to the journal. (Judge model = same Ollama, low temperature.)
+- **Swappable directors for A/B:** a `?director=<model>` URL param overrides largest-model
+  preference, so identical world-days can be replayed under different directors and their journals
+  compared — continuity-of-mind as a measurable, not a vibe.
+- Fact/fiction law extends: the journal is *evidence about the fiction layer* and says so in its
+  header. No claims about the real companies, ever.
