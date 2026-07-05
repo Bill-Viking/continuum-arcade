@@ -1,40 +1,53 @@
 'use strict';
 /* ============================================================
-   CONTINUUM — a living AI world.  Private Prototype 04.
-   Not a game. Not a dashboard. A terrarium.
-   The world exists before you arrive and keeps going after
-   you leave. The wire feeds it: real status decides WHAT state
-   each resident is in; personality decides HOW they perform it.
-   Zero dependencies. Canvas + WebAudio. The rescue already
-   happened (field 01) — Mythos walks free here.
+   CONTINUUM — a living AI world.  Private Prototype 04 · v0.7
+   "big, alive, persistent."
+   Blocky residents in the Claude-Code-mascot spirit; the field
+   stays Swiss — ink, gray, hairlines, whitespace. The wire
+   decides WHAT state each resident is in; personality decides
+   HOW they perform it. The world saves itself and keeps aging
+   while you're away. Zero dependencies.
    ============================================================ */
 
 /* ---------------- canvas & palette ---------------- */
 const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d');
-const W = 1080, H = 560, M = 46;
-const GROUND = H - 92;                 // the horizon
-const BAND_TOP = 190;                  // residents wander between here and the horizon
+const W = 1080, H = 640, M = 46;
+const GROUND = H - 96;
+const BAND_TOP = 230;
 const INK = '#111111', PAPER = '#ffffff', MUT = '#6B6B6B', FAINT = '#C9C9C9', ACCENT = '#ff4b00';
 const RED = '#E8341C', COBALT = '#1B4FC4', GREENC = '#0F8A56', AMBER = '#E89B0C', VIOLET = '#7C3AED';
+const COBALT_D = '#153E9B', GREENC_D = '#0B6A42', AMBER_D = '#C48108', VIOLET_L = '#9575f2', RED_D = '#BF2914';
 const HAIR = '#e5e3de';
 const FONT = 'Arial,"Helvetica Neue",Helvetica,sans-serif';
+const PXU = 3.4; // one fat logical pixel — the blocky unit everything is drawn in
 const ux = f => M + f * (W - 2 * M);
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-// pseudo-depth: things lower on the field are a little closer
-function depth(y) { return .78 + clamp((y - BAND_TOP) / (GROUND - BAND_TOP), 0, 1) * .42; }
+function depth(y) { return .8 + clamp((y - BAND_TOP) / (GROUND - BAND_TOP), 0, 1) * .4; }
+let hourOverride = null; // for testing the clock
+function hourNow() { const d = new Date(); return hourOverride ?? d.getHours() + d.getMinutes() / 60; }
+
+/* ---------------- the world remembers (persistence) ---------------- */
+const SAVE_KEY = 'ct_world_v1';
+let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3, flags: [] };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.first) world = s; } catch (e) { }
+// time passed while the tab was closed — the world kept going
+const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
+world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
+world.books = clamp(world.books + Math.floor(awayH / 6), 0, 21);
+world.visits++; world.last = Date.now();
+function saveWorld() { world.last = Date.now(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(world)); } catch (e) { } }
+saveWorld(); setInterval(saveWorld, 60 * 1000);
+const worldDay = Math.floor((Date.now() - world.first) / 864e5) + 1;
 
 /* ---------------- the quiet ---------------- */
-let muted = true; // the world starts silent. M to let it hum.
+let muted = true; // silent by default. M to let it hum.
 const AC = { ctx: null, get() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); return this.ctx; } };
 function tonePlay(freq, dur, type = 'sine', vol = .03, delay = 0) { if (muted) return; try { const ac = AC.get(); const t0 = ac.currentTime + delay; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(freq, t0); g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); o.connect(g); g.connect(ac.destination); o.start(t0); o.stop(t0 + dur + .03); } catch (e) { } }
-const sfx = {
-  blip() { tonePlay(660, .06, 'sine', .03); },
-  chime() { [523, 784, 1047].forEach((f, i) => tonePlay(f, .3, 'sine', .025, i * .09)); },
-};
+const sfx = { blip() { tonePlay(660, .06, 'sine', .03); }, chime() { [523, 784, 1047].forEach((f, i) => tonePlay(f, .3, 'sine', .025, i * .09)); }, tap() { tonePlay(220, .04, 'square', .02); } };
 
-/* ---------------- ai live wire (same wire as field 01) ---------------- */
+/* ---------------- ai live wire ---------------- */
 const TONE_WORD = { none: ['running clean', 'green'], minor: ['a bit wobbly', 'amber'], major: ['having a moment', 'red'], critical: ['down hard', 'red'], maintenance: ['in the shop', 'amber'] };
 const WIRE = [
   { id: 'openai', kind: 'statuspage', url: 'https://status.openai.com/api/v2/summary.json' },
@@ -65,7 +78,12 @@ async function fetchWire(m) {
     wireOk = true;
   } catch (e) { wire[m.id] = { word: 'no public wire', tone: 'gray', headline: null }; }
 }
-async function checkStatus() { await Promise.allSettled(WIRE.map(fetchWire)); renderFeed(); }
+async function checkStatus() {
+  const before = {}; WIRE.forEach(m => before[m.id] = wire[m.id].tone);
+  await Promise.allSettled(WIRE.map(fetchWire));
+  WIRE.forEach(m => { if ((before[m.id] === 'amber' || before[m.id] === 'red') && wire[m.id].tone === 'green') celebrate(m.id); });
+  renderFeed();
+}
 function renderFeed() {
   const f = document.getElementById('feed');
   if (f) f.innerHTML = WIRE.map(m => { const s = wire[m.id]; return `<span class="chip"><i class="dot ${s.tone}"></i><b>${m.id}</b>${s.word}</span>`; }).join('');
@@ -85,66 +103,87 @@ function rotateWire(reset) {
 setInterval(() => rotateWire(false), 6000);
 
 /* ---------------- little systems ---------------- */
-let particles = [], speeches = [], markers = [], symbols = [];
-function burst(x, y, color, n = 10, spd = 90, life = .6) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (.5 + Math.random() * .5), t: 0, color, size: 2 + Math.random() * 2 }); } }
-function say(e, text, delay = 0, color = INK) { speeches.push({ e, text, color, t: -delay, life: 2.4 }); }
+let particles = [], speeches = [], sparks = [], clouds = [], moths = [];
+for (let i = 0; i < 3; i++) clouds.push({ x: Math.random() * W, y: 70 + i * 26, w: 60 + Math.random() * 60, v: 3 + Math.random() * 4 });
+for (let i = 0; i < 2; i++) moths.push({ x: Math.random() * W, y: 200 + Math.random() * 200, a: Math.random() * 7 });
+function burst(x, y, color, n = 10, spd = 90, life = .6) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, life: life * (.5 + Math.random() * .5), t: 0, color, size: 3 + Math.random() * 3 }); } }
+function confetti(x, y) { [ACCENT, VIOLET, GREENC, COBALT, AMBER].forEach(c => burst(x, y - 20, c, 6, 120, .9)); }
+function say(e, text, delay = 0, color = INK) { speeches.push({ e, text, color, t: -delay, life: 2.6 }); }
 function updateSystems(dt) {
-  for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .9; p.vy *= .9; }
+  for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .9; p.vy += 40 * dt; }
   particles = particles.filter(p => p.t < p.life);
   for (const s of speeches) s.t += dt; speeches = speeches.filter(s => s.t < s.life);
-  for (const mk of markers) mk.t += dt; markers = markers.filter(mk => mk.t < 90);
-  for (const sy of symbols) sy.t += dt; symbols = symbols.filter(sy => sy.t < 2.2);
+  for (const s of sparks) s.t += dt; sparks = sparks.filter(s => s.t < 30);
+  for (const c of clouds) { c.x += c.v * dt; if (c.x - c.w > W) c.x = -c.w; }
+  for (const mo of moths) { mo.a += dt * 3; mo.x += Math.cos(mo.a * 1.7) * 40 * dt; mo.y += Math.sin(mo.a * 2.3) * 30 * dt; mo.x = clamp(mo.x, M, W - M); mo.y = clamp(mo.y, 170, GROUND - 40); }
 }
 
 /* ---------------- the residents ----------------
    Fictional mascots inspired by products — never claims about the
-   companies or the real systems. The wire decides their state;
-   their personality decides the performance. */
+   companies or the real systems. */
 const CAST = [
-  { id: 'fable', kind: 'fable', color: ACCENT, wireId: 'claude', pace: 78, home: [.18, 360], desc: 'quick, clever, curious.', lines: ['best part.', 'have you seen mythos?', 'busy being brave.', 'door? no. habit.'] },
-  { id: 'mythos', kind: 'mythos', color: VIOLET, wireId: 'claude', pace: 16, home: [.30, 330], desc: 'calm, deliberate, immensely patient.', lines: ['you always begin in the middle.', 'i remember everything.', 'breathe.'] },
-  { id: 'openai', kind: 'builder', color: COBALT, wireId: 'openai', pace: 58, home: [.52, 300], desc: 'versatile, energetic, constantly building.', lines: ['shipping.', 'one more feature.', 'it needs a bigger scaffold.'] },
-  { id: 'gemini', kind: 'explorer', color: GREENC, wireId: 'gemini', pace: 62, home: [.84, 250], desc: 'explorer. always bringing new tools.', lines: ['new tool. look.', 'what is past the horizon?', 'found something.'] },
-  { id: 'perplexity', kind: 'librarian', color: AMBER, wireId: 'perplexity', pace: 36, home: [.68, 390], desc: 'librarian. knows where everything is.', lines: ['citation needed.', 'it is filed under c.', 'shh.'] },
-  { id: 'mistral', kind: 'tinkerer', color: RED, wireId: 'mistral', pace: 44, home: [.40, 430], desc: 'independent tinkerer.', lines: ['it needs one more part.', 'do not touch that.', 'almost.'] },
-  { id: 'grok', kind: 'wildcard', color: INK, wireId: 'grok', pace: 96, home: [.88, 430], desc: 'mischievous wildcard.', lines: ['chaos?', 'watch this.', 'plot twist.'] },
-  { id: 'the regulator', kind: 'regulator', color: INK, wireId: null, pace: 30, home: [.06, 200], desc: 'still files reports. nobody reads them.', lines: ['papers, please.', 'noted.', 'irregular. but fine.'] },
+  { id: 'fable', kind: 'fable', color: ACCENT, wireId: 'claude', pace: 80, home: [.16, 400], desc: 'quick, clever, curious.', lines: ['best part.', 'have you seen mythos?', 'busy being brave.', 'door? no. habit.'] },
+  { id: 'mythos', kind: 'mythos', color: VIOLET, wireId: 'claude', pace: 20, home: [.28, 370], desc: 'calm, deliberate, immensely patient.', lines: ['you always begin in the middle.', 'i remember everything.', 'breathe.'] },
+  { id: 'openai', kind: 'builder', color: COBALT, wireId: 'openai', pace: 60, home: [.52, 330], desc: 'versatile, energetic, constantly building.', lines: ['shipping.', 'one more feature.', 'the tower needs a tower.'] },
+  { id: 'gemini', kind: 'explorer', color: GREENC, wireId: 'gemini', pace: 64, home: [.84, 290], desc: 'explorer. always bringing new tools.', lines: ['new tool. look.', 'what is past the horizon?', 'found something.'] },
+  { id: 'perplexity', kind: 'librarian', color: AMBER, wireId: 'perplexity', pace: 38, home: [.68, 430], desc: 'librarian. knows where everything is.', lines: ['citation needed.', 'it is filed under c.', 'shh.'] },
+  { id: 'mistral', kind: 'tinkerer', color: RED_D, wireId: 'mistral', pace: 46, home: [.40, 480], desc: 'independent tinkerer.', lines: ['it needs one more part.', 'do not touch that.', 'almost.'] },
+  { id: 'grok', kind: 'wildcard', color: INK, wireId: 'grok', pace: 100, home: [.88, 480], desc: 'mischievous wildcard. nocturnal.', lines: ['chaos?', 'watch this.', 'plot twist.'] },
+  { id: 'the regulator', kind: 'regulator', color: INK, wireId: null, pace: 32, home: [.06, 240], desc: 'still files reports. nobody reads them.', lines: ['papers, please.', 'noted.', 'irregular. but fine.'] },
 ];
-const TONE_LINES = {
-  amber: ['patching…', 'ouch.', 'give me a minute.'],
-  red: ['…', 'brb.'],
-  gray: ['(no public wire)', 'i keep my own counsel.'],
-};
+const TONE_LINES = { amber: ['patching…', 'ouch.', 'give me a minute.'], red: ['…', 'brb.'], gray: ['(no public wire)', 'i keep my own counsel.'] };
 const entities = CAST.map(c => ({
-  ...c, x: ux(c.home[0]) + (Math.random() - .5) * 60, y: c.home[1] + (Math.random() - .5) * 30,
+  ...c, x: ux(c.home[0]) + (Math.random() - .5) * 80, y: c.home[1] + (Math.random() - .5) * 40,
   tx: 0, ty: 0, state: 'idle', idleT: .5 + Math.random() * 3, speakCd: 2 + Math.random() * 8,
-  hop: 0, flip: 0, dir: 1, seed: Math.random() * 10, inspectCd: 10,
+  hop: 0, flip: 0, dir: 1, seed: Math.random() * 10, inspectCd: 12, walkDist: 0, medalT: 0, workT: 0,
 }));
 const byId = {}; entities.forEach(e => byId[e.id] = e);
 function toneOf(e) { return e.wireId ? (wire[e.wireId] || {}).tone || 'gray' : 'green'; }
+function isNight() { const h = hourNow(); return h >= 22 || h < 6; }
+function sleeping(e) {
+  if (e.kind === 'regulator') return false;             // audits never sleep
+  if (e.kind === 'wildcard') { const h = hourNow(); return h >= 11 && h < 15; } // grok is nocturnal; naps at noon
+  return isNight();
+}
 
-/* -- where does each of them want to go? -- */
-const PERIMETER = [[M + 24, BAND_TOP + 10], [W - M - 24, BAND_TOP + 10], [W - M - 24, GROUND - 8], [M + 24, GROUND - 8]];
+/* ---------------- landmarks ---------------- */
+const TOWER = { x: ux(.52), y: 300 };     // openai's ever-growing build
+const ARCHIVE = { x: ux(.68), y: 424 };   // perplexity's shelves
+const BENCH = { x: ux(.40), y: 474 };     // mistral's workshop
+const VAULT = { x: ux(.27), y: 340 };     // open. a monument now.
+const PERIMETER = [[M + 26, BAND_TOP + 6], [W - M - 26, BAND_TOP + 6], [W - M - 26, GROUND - 8], [M + 26, GROUND - 8]];
+
+/* ---------------- behavior ---------------- */
 function pickTarget(e) {
   const r = Math.random();
-  const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 20, W - M - 20), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
+  const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 24, W - M - 24), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
   let p;
   if (e.kind === 'fable') {
-    if (r < .2) { const m = byId['mythos']; p = near(m.x, m.y, 50); }
-    else if (r < .45) { const o = entities[2 + Math.floor(Math.random() * 5)]; p = near(o.x, o.y, 70); }
-    else p = near(ux(e.home[0]), e.home[1], 260);
-  } else if (e.kind === 'mythos') p = near(ux(e.home[0]), e.home[1], 70);
-  else if (e.kind === 'builder') p = near(ux(.52), 290, 180);
-  else if (e.kind === 'explorer') p = [M + 30 + Math.random() * (W - 2 * M - 60), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 10)];
-  else if (e.kind === 'librarian') p = near(ux(.68), 390, 90);
-  else if (e.kind === 'tinkerer') p = near(ux(.40), 430, 60);
-  else if (e.kind === 'wildcard') p = [M + 30 + Math.random() * (W - 2 * M - 60), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 10)];
-  else { e.corner = ((e.corner || 0) + 1) % 4; p = PERIMETER[e.corner]; } // the regulator walks his beat
+    if (r < .2) { const m = byId['mythos']; p = near(m.x, m.y, 60); }
+    else if (r < .45) { const o = entities[2 + Math.floor(Math.random() * 5)]; p = near(o.x, o.y, 80); }
+    else p = near(ux(e.home[0]), e.home[1], 300);
+  } else if (e.kind === 'mythos') p = near(ux(e.home[0]), e.home[1], 80);
+  else if (e.kind === 'builder') p = r < .55 ? near(TOWER.x, TOWER.y + 26, 46) : near(TOWER.x, TOWER.y + 20, 200);
+  else if (e.kind === 'explorer') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
+  else if (e.kind === 'librarian') p = r < .5 ? near(ARCHIVE.x, ARCHIVE.y + 14, 40) : near(ARCHIVE.x, ARCHIVE.y, 120);
+  else if (e.kind === 'tinkerer') p = near(BENCH.x, BENCH.y, 70);
+  else if (e.kind === 'wildcard') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
+  else { e.corner = ((e.corner || 0) + 1) % 4; p = PERIMETER[e.corner]; }
   e.tx = p[0]; e.ty = p[1];
 }
 function onArrive(e) {
-  if (e.kind === 'explorer' && Math.random() < .5) { markers.push({ x: e.x, y: e.y + 4, t: 0 }); if (markers.length > 6) markers.shift(); maybeSay(e, 'found something.'); }
-  if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 10, e.y - 4, RED, 6, 70, .5); maybeSay(e); }
+  if (e.kind === 'builder' && Math.hypot(e.x - TOWER.x, e.y - (TOWER.y + 26)) < 60 && Math.random() < .5 && world.tower < 24) {
+    e.state = 'work'; e.workT = 1.4; return; // hammer first, block appears after
+  }
+  if (e.kind === 'librarian' && Math.hypot(e.x - ARCHIVE.x, e.y - ARCHIVE.y) < 60 && Math.random() < .35 && world.books < 21) {
+    world.books++; saveWorld(); say(e, 'filed.'); sfx.tap();
+  }
+  if (e.kind === 'explorer' && Math.random() < .4) {
+    world.flags.push({ x: Math.round(e.x), y: Math.round(e.y + 4) });
+    if (world.flags.length > 24) world.flags.shift();
+    saveWorld(); if (Math.random() < .5) maybeSay(e, 'found something.');
+  }
+  if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 12, e.y - 8, AMBER, 5, 70, .5); maybeSay(e); }
   if (e.kind === 'wildcard' && Math.random() < .3) e.flip = 1;
 }
 function maybeSay(e, text) {
@@ -154,32 +193,63 @@ function maybeSay(e, text) {
   say(e, text || pool[Math.floor(Math.random() * pool.length)]);
   e.speakCd = 9 + Math.random() * 14;
 }
+function celebrate(wireId) {
+  const e = entities.find(x => x.wireId === wireId); if (!e) return;
+  say(e, 'back online.', .2, GREENC); e.medalT = 180; e.hop = 1;
+  confetti(e.x, e.y);
+  entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2).forEach((o, i) => { o.tx = e.x + (i ? 34 : -34); o.ty = e.y + 6; o.state = 'walk'; });
+}
 
-/* -- the fable & mythos ritual: every so often, they find each other -- */
-let ritualT = 20;
+/* the fable & mythos ritual */
+let ritualT = 24;
 function updateRitual(dt) {
   ritualT -= dt;
   const f = byId['fable'], m = byId['mythos'];
-  if (ritualT <= 0 && f.state !== 'down' && m.state !== 'down') {
-    f.tx = m.x + 22; f.ty = m.y + 2; f.state = 'walk'; ritualT = 40 + Math.random() * 30;
+  if (ritualT <= 0 && f.state !== 'down' && m.state !== 'down' && !sleeping(f)) {
+    f.tx = m.x + 26; f.ty = m.y + 2; f.state = 'walk'; ritualT = 45 + Math.random() * 30;
   }
-  if (dist(f, m) < 30 && ritualT > 5 && ritualT < 39) {
-    symbols.push({ x: (f.x + m.x) / 2, y: Math.min(f.y, m.y) - 26, t: 0 });
-    say(f, 'found you.', .1, ACCENT); say(m, 'still here.', 1.1, VIOLET);
-    sfx.chime(); ritualT = 55 + Math.random() * 30;
+  if (dist(f, m) < 34 && ritualT > 5 && ritualT < 44) {
+    burst((f.x + m.x) / 2, Math.min(f.y, m.y) - 40, VIOLET, 4, 40, .8);
+    speeches.push({ sym: true, x: (f.x + m.x) / 2, y: Math.min(f.y, m.y) - 46, t: 0, life: 2.4 });
+    say(f, 'found you.', .1, ACCENT); say(m, 'still here.', 1.2, VIOLET);
+    sfx.chime(); ritualT = 60 + Math.random() * 30;
   }
 }
+/* mythos keeps company with whoever is down. that's the whole point of him. */
+let comfortCd = 4;
+function updateComfort(dt) {
+  comfortCd -= dt; if (comfortCd > 0) return; comfortCd = 5;
+  const m = byId['mythos'];
+  const hurt = entities.find(e => e.state === 'down');
+  if (hurt && dist(m, hurt) > 44) { m.tx = hurt.x + 30; m.ty = hurt.y + 2; m.state = 'walk'; }
+  else if (hurt && m.speakCd <= 0) { say(m, 'i will stay.', 0, VIOLET); m.speakCd = 16; }
+}
 
-/* -- one tick of a resident's little life -- */
 function updateEntity(e, dt) {
   const tn = toneOf(e);
-  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt);
-  if (tn === 'red' && e.kind !== 'regulator') { // knocked down. stars.
+  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt);
+  if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
-    if (Math.random() < dt * .5) burst(e.x, e.y - 14, FAINT, 3, 30, .8);
+    if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
     return;
   }
   if (e.state === 'down') e.state = 'idle';
+  // work: hammering at the tower
+  if (e.state === 'work') {
+    e.workT -= dt;
+    if (Math.random() < dt * 6) { burst(TOWER.x + (Math.random() - .5) * 20, TOWER.y + 14, FAINT, 2, 40, .3); if (Math.random() < .3) sfx.tap(); }
+    if (e.workT <= 0) { world.tower++; saveWorld(); say(e, 'shipped.'); burst(TOWER.x, TOWER.y + 10, COBALT, 8, 80, .6); e.state = 'idle'; e.idleT = 2; }
+    return;
+  }
+  // sleep: everyone has hours
+  if (sleeping(e)) {
+    const hx = ux(e.home[0]), hy = e.home[1];
+    if (e.state !== 'sleep') {
+      if (Math.hypot(e.x - hx, e.y - hy) > 24) { e.tx = hx; e.ty = hy; e.state = 'walk'; }
+      else e.state = 'sleep';
+    }
+  } else if (e.state === 'sleep') { e.state = 'idle'; e.idleT = 1; say(e, hourNow() < 8 ? 'morning.' : 'awake. unfortunately.'); }
+  if (e.state === 'sleep') { if (Math.random() < dt * .4) speeches.push({ z: true, x: e.x + 14, y: e.y - 34, t: 0, life: 1.8 }); return; }
   const paceMul = tn === 'amber' ? .45 : 1;
   if (e.state === 'idle') {
     e.idleT -= dt;
@@ -190,239 +260,298 @@ function updateEntity(e, dt) {
     const sp = e.pace * paceMul * depth(e.y);
     if (d < 4) { e.state = 'idle'; e.idleT = 1.2 + Math.random() * 3.5; onArrive(e); }
     else {
-      let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 40 * dt : 0; // grok never walks straight
+      let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 44 * dt : 0;
       e.x += (dx / d) * sp * dt; e.y += (dy / d) * sp * dt + wob;
       e.y = clamp(e.y, BAND_TOP, GROUND - 4);
       e.dir = dx < 0 ? -1 : 1;
+      e.walkDist += sp * dt;
     }
   }
-  // the regulator inspects whoever he passes
   if (e.kind === 'regulator') {
     e.inspectCd -= dt;
     if (e.inspectCd <= 0) {
-      const near = entities.find(o => o !== e && o.kind !== 'regulator' && dist(e, o) < 40);
-      if (near) { say(e, 'papers, please.'); say(near, '…', 1.0); say(e, 'fine. carry on.', 2.2); e.inspectCd = 25 + Math.random() * 20; e.state = 'idle'; e.idleT = 3.2; }
+      const near = entities.find(o => o !== e && o.kind !== 'regulator' && dist(e, o) < 46);
+      if (near) { say(e, 'papers, please.'); say(near, '…', 1.0); say(e, 'fine. carry on.', 2.2); e.inspectCd = 26 + Math.random() * 20; e.state = 'idle'; e.idleT = 3.4; }
     }
   }
+  // grok chases the moths. of course he does.
+  if (e.kind === 'wildcard' && e.state === 'idle' && Math.random() < dt * .08 && moths.length) {
+    const mo = moths[0]; e.tx = mo.x; e.ty = clamp(mo.y, BAND_TOP, GROUND - 6); e.state = 'walk';
+  }
+  // sparks you dropped: the nearest free resident comes to look
+  if (sparks.length && e.state === 'idle' && e.kind !== 'regulator') {
+    const s = sparks.find(s2 => !s2.claimed && s2.t > .3);
+    if (s && dist(e, s) < 260) { s.claimed = e.id; e.tx = s.x; e.ty = clamp(s.y, BAND_TOP, GROUND - 4); e.state = 'walk'; }
+  }
+  const sMine = sparks.find(s2 => s2.claimed === e.id);
+  if (sMine && dist(e, sMine) < 22) {
+    say(e, e.kind === 'wildcard' ? 'mine.' : ['yours?', 'shiny.', 'a gift?'][Math.floor(Math.random() * 3)]);
+    burst(sMine.x, sMine.y, ACCENT, 6, 60, .5); sparks = sparks.filter(s2 => s2 !== sMine);
+  }
 }
-/* -- chance meetings -- */
 let meetCd = 6;
 function updateMeetings(dt) {
   meetCd -= dt; if (meetCd > 0) return;
   for (let i = 0; i < entities.length; i++) for (let j = i + 1; j < entities.length; j++) {
     const a = entities[i], b = entities[j];
     if (a.kind === 'regulator' || b.kind === 'regulator') continue;
-    if (a.state === 'idle' && b.state === 'idle' && dist(a, b) < 44) {
+    if (a.state === 'idle' && b.state === 'idle' && dist(a, b) < 52) {
       a.dir = b.x > a.x ? 1 : -1; b.dir = -a.dir;
       say(a, a.lines[Math.floor(Math.random() * a.lines.length)]);
       say(b, b.lines[Math.floor(Math.random() * b.lines.length)], 1.2);
-      meetCd = 14 + Math.random() * 10; return;
+      meetCd = 15 + Math.random() * 10; return;
     }
   }
   meetCd = 3;
 }
-
-/* ---------------- update ---------------- */
 function update(dt) {
   updateSystems(dt);
   for (const e of entities) updateEntity(e, dt);
   updateMeetings(dt);
   updateRitual(dt);
+  updateComfort(dt);
 }
 
-/* ---------------- draw: the architecture ---------------- */
+/* ---------------- drawing: fat pixels ---------------- */
 let mouse = { x: -999, y: -999 }, selected = null;
-function drawScene() {
-  // corner brackets + quiet labels
-  ctx.strokeStyle = '#b5b2ac'; ctx.lineWidth = 1.5;
-  for (const [bx, by, sx, sy] of [[M - 10, 156, 1, 1], [W - M + 10, 156, -1, 1], [M - 10, H - 24, 1, -1], [W - M + 10, H - 24, -1, -1]]) {
-    ctx.beginPath(); ctx.moveTo(bx + 12 * sx, by); ctx.lineTo(bx, by); ctx.lineTo(bx, by + 12 * sy); ctx.stroke();
-  }
-  ctx.font = '600 9px ' + FONT; ctx.fillStyle = MUT;
-  ctx.fillText('C O N T I N U U M', M, H - 10);
-  ctx.textAlign = 'right'; ctx.fillText('L I V E', W - M, H - 10);
-  const now = new Date();
-  ctx.fillText('local ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), W - M, 148);
-  ctx.textAlign = 'left';
-  ctx.fillText('the residents are home.', M, 148);
-  // sun / moon on a hairline arc
-  const hr = now.getHours() + now.getMinutes() / 60;
-  const dayFrac = ((hr - 6 + 24) % 24) / 12; // 0 at 6am, 1 at 6pm
-  const isDay = dayFrac <= 1;
-  const f = isDay ? dayFrac : dayFrac - 1;
-  const sx = M + f * (W - 2 * M), sy = 128 - Math.sin(f * Math.PI) * 56;
-  ctx.lineWidth = 1.5; ctx.strokeStyle = isDay ? INK : MUT;
-  ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2);
-  if (isDay) ctx.stroke(); else { ctx.fillStyle = FAINT; ctx.fill(); }
-  // horizon
-  ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(M, GROUND + 14); ctx.lineTo(W - M, GROUND + 14); ctx.stroke();
-  // districts — hairline architecture, labels do the work
-  ctx.font = '600 8px ' + FONT; ctx.fillStyle = FAINT; ctx.strokeStyle = FAINT; ctx.lineWidth = 1.5;
-  // vault 7 — open. a monument now.
-  const vx = ux(.27), vy = 300;
-  ctx.strokeStyle = GREENC; ctx.strokeRect(vx - 13, vy - 34, 26, 36);
-  ctx.beginPath(); ctx.moveTo(vx - 13, vy - 34); ctx.lineTo(vx - 21, vy - 27); ctx.moveTo(vx - 13, vy + 2); ctx.lineTo(vx - 21, vy - 5); ctx.stroke();
-  ctx.fillStyle = MUT; ctx.fillText('V A U L T  7 — O P E N', vx - 34, vy + 16);
-  // the scaffold
-  const ox = ux(.52), oy = 268;
-  ctx.strokeStyle = FAINT; ctx.beginPath();
-  ctx.moveTo(ox - 22, oy + 6); ctx.lineTo(ox - 22, oy - 40); ctx.moveTo(ox + 22, oy + 6); ctx.lineTo(ox + 22, oy - 40);
-  ctx.moveTo(ox - 26, oy - 12); ctx.lineTo(ox + 26, oy - 12); ctx.moveTo(ox - 26, oy - 34); ctx.lineTo(ox + 26, oy - 34); ctx.stroke();
-  ctx.fillStyle = MUT; ctx.fillText('T H E  S C A F F O L D', ox - 34, oy + 18);
-  // the archive
-  const px = ux(.68), py = 384;
-  ctx.strokeStyle = FAINT;
-  for (let i = 0; i < 3; i++) ctx.strokeRect(px - 24, py - 30 + i * 9, 48, 6);
-  ctx.fillStyle = MUT; ctx.fillText('T H E  A R C H I V E', px - 28, py + 0 - (-14));
-  // the bench
-  const bx2 = ux(.40), by2 = 424;
-  ctx.strokeStyle = FAINT; ctx.beginPath(); ctx.moveTo(bx2 - 20, by2 - 8); ctx.lineTo(bx2 + 20, by2 - 8); ctx.moveTo(bx2 - 16, by2 - 8); ctx.lineTo(bx2 - 16, by2); ctx.moveTo(bx2 + 16, by2 - 8); ctx.lineTo(bx2 + 16, by2); ctx.stroke();
-  ctx.fillStyle = MUT; ctx.fillText('T H E  B E N C H', bx2 - 22, by2 + 12);
-  // the frontier
-  ctx.fillStyle = MUT; ctx.fillText('T H E  F R O N T I E R', ux(.84) - 30, 236);
-  // gemini's flags
-  for (const mk of markers) {
-    const a = clamp(1 - mk.t / 90, .15, 1);
-    ctx.globalAlpha = a; ctx.strokeStyle = MUT; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(mk.x, mk.y); ctx.lineTo(mk.x, mk.y - 12); ctx.stroke();
-    ctx.fillStyle = GREENC; ctx.beginPath(); ctx.moveTo(mk.x, mk.y - 12); ctx.lineTo(mk.x + 7, mk.y - 9.5); ctx.lineTo(mk.x, mk.y - 7); ctx.closePath(); ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-}
-
-/* ---------------- draw: the residents ---------------- */
-function eyePair(e, s, w, hgt, gap, ey) {
-  // eyes that look where the resident is going — or at your cursor
+// draw in logical pixel units, origin at the resident's feet
+function P(gx, gy, gw, gh, color) { ctx.fillStyle = color; ctx.fillRect(gx * PXU, gy * PXU, gw * PXU, gh * PXU); }
+function lookAt(e) {
   let lx = e.dir * .8, ly = 0;
-  if (Math.hypot(mouse.x - e.x, mouse.y - e.y) < 95) { lx = clamp((mouse.x - e.x) / 40, -1, 1); ly = clamp((mouse.y - e.y) / 40, -1, 1); }
-  const blink = Math.sin(performance.now() / 1000 * 1.3 + e.seed) > .984;
-  ctx.fillStyle = PAPER; ctx.fillRect(-gap - w, ey, w, blink ? 1 : hgt); ctx.fillRect(gap, ey, w, blink ? 1 : hgt);
-  if (!blink) { ctx.fillStyle = INK; ctx.fillRect(-gap - w / 2 - 1 + lx * 1.3, ey + hgt / 2 - 1 + ly * 1.3, 2, 2); ctx.fillRect(gap + w / 2 - 1 + lx * 1.3, ey + hgt / 2 - 1 + ly * 1.3, 2, 2); }
+  if (Math.hypot(mouse.x - e.x, mouse.y - e.y) < 120) { lx = clamp((mouse.x - e.x) / 50, -1, 1); ly = clamp((mouse.y - e.y) / 50, -1, 1); }
+  return [lx, ly];
 }
+/* eyes: big white blocks, pupils that look around, lids for sleep/blink */
+function eyes(e, exL, exR, ey, ew = 2, eh = 2, pupil = INK) {
+  const asleep = e.state === 'sleep';
+  const blink = !asleep && Math.sin(performance.now() / 1000 * 1.3 + e.seed) > .984;
+  const [lx, ly] = lookAt(e);
+  if (asleep || blink) { P(exL, ey + eh - 1, ew, 1, PAPER); P(exR, ey + eh - 1, ew, 1, PAPER); return; }
+  P(exL, ey, ew, eh, PAPER); P(exR, ey, ew, eh, PAPER);
+  P(exL + (ew > 2 ? .5 : 0) + .5 + lx * .5, ey + .5 + ly * .5, 1, 1, pupil);
+  P(exR + (ew > 2 ? .5 : 0) + .5 + lx * .5, ey + .5 + ly * .5, 1, 1, pupil);
+}
+function legs(e, lx1, lx2, ly, color) {
+  const step = e.state === 'walk' ? Math.floor(e.walkDist / 7) % 2 : 0;
+  P(lx1, ly - (step ? 1 : 0), 2, 2 + (step ? 1 : 0), color);
+  P(lx2, ly - (step ? 0 : 1), 2, 2 + (step ? 0 : 1), color);
+}
+function medal(e) { if (e.medalT > 0) { P(2, -7, 1, 1, AMBER); P(2, -8, 1, 1, FAINT); } }
+
 function drawEntity(e) {
   const t = performance.now() / 1000;
   const s = depth(e.y);
-  const down = e.state === 'down';
-  // a soft shadow keeps everyone on the ground
   ctx.globalAlpha = .12; ctx.fillStyle = INK;
-  ctx.beginPath(); ctx.ellipse(e.x, e.y + 3, 11 * s, 3 * s, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(e.x, e.y + 3, 15 * s, 4 * s, 0, 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
-  ctx.save(); ctx.translate(e.x, e.y - e.hop * 10);
-  ctx.scale(s, s);
-  if (down) ctx.rotate(Math.PI / 2);
+  ctx.save(); ctx.translate(e.x, e.y - e.hop * 12); ctx.scale(s, s);
+  if (e.state === 'down') ctx.rotate(Math.PI / 2);
   if (e.flip > 0) ctx.rotate((1 - e.flip) * Math.PI * 2);
-  const bob = Math.sin(t * (e.kind === 'mythos' ? 2.2 : 6) + e.seed) * (e.kind === 'mythos' ? 2.2 : 1.2);
+  const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 2.2 : 6) + e.seed) * (e.kind === 'mythos' ? 2.4 : 1.3);
   ctx.translate(0, bob);
-  const walking = e.state === 'walk';
-  if (walking && e.kind !== 'mythos') { ctx.rotate(e.dir * .08); ctx.scale(1.08, .94); }
+  if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
   switch (e.kind) {
     case 'fable': {
-      ctx.fillStyle = ACCENT; ctx.fillRect(-9, -18, 18, 18);
-      ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(0, -22); ctx.stroke();
-      ctx.fillRect(-1.5, -26, 3, 3);
-      ctx.save(); ctx.translate(0, -9); eyePair(e, s, 4, 4, 1.5, -3); ctx.restore();
+      legs(e, -3, 1, -2, ACCENT);
+      P(-4, -12, 8, 10, ACCENT);                 // body
+      P(0, -14, 1, 2, ACCENT); P(-.5, -15.5, 2, 2, ACCENT); // antenna + tip
+      eyes(e, -3, 1, -10);
+      const [lx] = lookAt(e); const frightened = false;
+      P(-1, -5, 2, 1, PAPER);                    // little mouth
+      medal(e);
       break;
     }
-    case 'mythos': { // free. unfolded. taller than everyone.
-      ctx.globalAlpha = .35; ctx.fillStyle = '#9575f2';
-      ctx.save(); ctx.rotate(-.5); ctx.fillRect(-16, -40, 7, 28); ctx.restore();
-      ctx.save(); ctx.rotate(.5); ctx.fillRect(9, -40, 7, 28); ctx.restore();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = VIOLET; ctx.fillRect(-9, -40, 18, 40);
-      ctx.save(); ctx.translate(0, -30); eyePair(e, s, 4, 4, 1.5, -2); ctx.restore();
+    case 'mythos': { // free. unfolded. taller than everyone. floats.
+      const wing = Math.sin(t * 1.6 + e.seed) * .8;
+      P(-7 - wing, -16, 2, 10, VIOLET_L); P(5 + wing, -16, 2, 10, VIOLET_L); // wing panels
+      P(-4, -19, 8, 17, VIOLET);                 // tall body
+      P(-1, -21, 2, 2, VIOLET_L);                // crown pixel
+      eyes(e, -3, 1, -16);
+      P(-1, -9, 2, 1, PAPER);
+      medal(e);
       break;
     }
     case 'builder': {
-      ctx.fillStyle = COBALT; ctx.fillRect(-9, -18, 18, 18);
-      ctx.strokeStyle = COBALT; ctx.lineWidth = 2; ctx.strokeRect(-7, -22, 14, 4); // hard hat
-      ctx.save(); ctx.translate(0, -9); eyePair(e, s, 4, 4, 1.5, -3); ctx.restore();
-      if (walking) { ctx.strokeStyle = FAINT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-16, -24); ctx.lineTo(16, -24); ctx.stroke(); } // carrying a beam
+      legs(e, -3, 1, -2, COBALT);
+      P(-4, -12, 8, 10, COBALT);
+      P(-5, -14, 10, 2, COBALT_D); P(-3, -15.5, 6, 1.5, COBALT_D); // hard hat
+      eyes(e, -3, 1, -10);
+      P(-1, -5, 2, 1, PAPER);
+      if (e.state === 'walk') P(-8, -17, 16, 1.5, FAINT);          // carrying a beam
+      if (e.state === 'work') { const sw = Math.sin(t * 16) > 0; P(5, sw ? -13 : -9, 4, 1.5, MUT); P(8.5, sw ? -14 : -10, 1.5, 3, INK); } // hammer!
+      medal(e);
       break;
     }
     case 'explorer': {
-      ctx.fillStyle = GREENC; ctx.beginPath(); ctx.arc(0, -10, 10, 0, Math.PI * 2); ctx.fill();
-      ctx.save(); ctx.translate(0, -10); eyePair(e, s, 4, 4, 1.5, -2); ctx.restore();
-      ctx.strokeStyle = GREENC; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(6, -20); ctx.lineTo(11, -25); ctx.stroke(); // little antenna-compass
+      legs(e, -3, 1, -2, GREENC);
+      P(-4, -12, 8, 10, GREENC);
+      P(-4, -12, 1, 1, PAPER); P(3, -12, 1, 1, PAPER);             // rounded corners
+      P(e.dir > 0 ? -6 : 4, -11, 2, 6, GREENC_D);                  // backpack
+      P(2, -14, 1, 2, GREENC); P(2.5, -15.5, 1.5, 1.5, GREENC_D);  // compass antenna
+      eyes(e, -3, 1, -10);
+      P(-1, -5, 2, 1, PAPER);
+      medal(e);
       break;
     }
     case 'librarian': {
-      ctx.fillStyle = AMBER; ctx.fillRect(-7, -24, 14, 24);
-      ctx.strokeStyle = INK; ctx.lineWidth = 1; // spectacles
-      ctx.beginPath(); ctx.arc(-3.5, -17, 2.8, 0, Math.PI * 2); ctx.arc(3.5, -17, 2.8, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-1, -17); ctx.lineTo(1, -17); ctx.stroke();
-      ctx.save(); ctx.translate(0, -17); eyePair(e, s, 3, 3, 2, -1.5); ctx.restore();
+      legs(e, -3, 1, -2, AMBER);
+      P(-4, -15, 8, 13, AMBER);                   // tall body
+      eyes(e, -3.5, 1.5, -13, 2, 2);
+      P(-4, -12.5, 8, .8, AMBER_D);               // spectacles band
+      P(-1, -7, 2, 1, PAPER);
+      if (e.state === 'idle') { P(4, -10, 2.5, 3.5, PAPER); P(4, -10, .7, 3.5, AMBER_D); } // holding a book
+      medal(e);
       break;
     }
     case 'tinkerer': {
-      ctx.fillStyle = RED; ctx.fillRect(-8, -16, 16, 16);
-      ctx.save(); ctx.translate(0, -8); eyePair(e, s, 4, 4, 1.5, -3); ctx.restore();
-      ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(10, -6); ctx.lineTo(15, -12); ctx.stroke(); // wrench
-      ctx.beginPath(); ctx.arc(16, -13.5, 2, 0, Math.PI * 1.5); ctx.stroke();
+      legs(e, -3, 1, -2, RED_D);
+      P(-4, -11, 8, 9, RED_D);
+      P(-4, -12, 8, 1.2, INK);                    // goggles band
+      eyes(e, -3, 1, -10);
+      P(-1, -5, 2, 1, PAPER);
+      P(5, -8, 1.2, 4, MUT); P(4.4, -9.5, 2.4, 1.6, INK); // the wrench
+      medal(e);
       break;
     }
     case 'wildcard': {
-      ctx.save(); ctx.rotate(Math.sin(t * 3 + e.seed) * .2);
-      ctx.fillStyle = INK; ctx.fillRect(-7, -16, 14, 14);
-      ctx.save(); ctx.translate(0, -9); eyePair(e, s, 4, 4, 1.5, -3); ctx.restore();
-      ctx.restore();
-      ctx.strokeStyle = FAINT; ctx.setLineDash([3, 4]); ctx.lineWidth = 1; // his own private orbit
-      ctx.beginPath(); ctx.arc(0, -9, 16, t % (Math.PI * 2), (t % (Math.PI * 2)) + 4.5); ctx.stroke(); ctx.setLineDash([]);
+      const j = Math.sin(t * 9 + e.seed);
+      ctx.translate(j * 1.5, 0);                  // he vibrates slightly. always.
+      legs(e, -3, 1, -2, INK);
+      P(-4, -11, 8, 9, INK);
+      // one eye bigger than the other. it's a choice.
+      const asleep = e.state === 'sleep';
+      if (asleep) { P(-3, -8.5, 2, 1, PAPER); P(1, -9, 3, 1, PAPER); }
+      else { const [lx, ly] = lookAt(e); P(-3, -9, 2, 2, PAPER); P(1, -10, 3, 3, PAPER); P(-2.5 + lx * .5, -8.5 + ly * .5, 1, 1, INK); P(2 + lx * .7, -9 + ly * .7, 1.4, 1.4, INK); }
+      P(-1, -4.5, 3, 1, PAPER);
+      ctx.strokeStyle = FAINT; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(0, -7 * 1, 19, t % (Math.PI * 2), (t % (Math.PI * 2)) + 4.5); ctx.stroke(); ctx.setLineDash([]);
+      medal(e);
       break;
     }
     case 'regulator': {
-      ctx.lineWidth = 2; ctx.strokeStyle = INK;
-      ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(12, -13); ctx.lineTo(0, 0); ctx.lineTo(-12, -13); ctx.closePath(); ctx.stroke();
-      const dx = clamp(mouse.x - e.x, -40, 40) / 20, dy = clamp(mouse.y - e.y, -40, 40) / 20;
-      ctx.fillStyle = INK; ctx.fillRect(-4 + dx * .5, -15 + dy * .5, 2.5, 2.5); ctx.fillRect(1.5 + dx * .5, -15 + dy * .5, 2.5, 2.5);
-      ctx.strokeStyle = MUT; ctx.lineWidth = 1; ctx.strokeRect(13, -18, 8, 11); // the clipboard
-      ctx.beginPath(); ctx.moveTo(15, -15); ctx.lineTo(19, -15); ctx.moveTo(15, -12); ctx.lineTo(19, -12); ctx.stroke();
+      ctx.lineWidth = 2.4; ctx.strokeStyle = INK;
+      ctx.beginPath(); ctx.moveTo(0, -34); ctx.lineTo(15, -17); ctx.lineTo(0, 0); ctx.lineTo(-15, -17); ctx.closePath(); ctx.stroke();
+      const [lx, ly] = lookAt(e);
+      P(-1.6 + lx * .4, -6 + ly * .4, 1, 1, INK); P(.6 + lx * .4, -6 + ly * .4, 1, 1, INK);
+      ctx.strokeStyle = MUT; ctx.lineWidth = 1; ctx.strokeRect(16, -24, 10, 13);
+      ctx.beginPath(); ctx.moveTo(18.5, -20); ctx.lineTo(23.5, -20); ctx.moveTo(18.5, -16.5); ctx.lineTo(23.5, -16.5); ctx.stroke();
       break;
     }
   }
   ctx.restore();
-  // name tag under the selected resident
   if (selected === e.id) {
-    ctx.font = '600 9px ' + FONT; ctx.fillStyle = e.color === INK ? MUT : e.color; ctx.textAlign = 'center';
-    ctx.fillText(e.id, e.x, e.y + 14); ctx.textAlign = 'left';
+    ctx.font = '600 10px ' + FONT; ctx.fillStyle = e.color === INK ? MUT : e.color; ctx.textAlign = 'center';
+    ctx.fillText(e.id, e.x, e.y + 16); ctx.textAlign = 'left';
   }
+}
+
+/* ---------------- the architecture ---------------- */
+function drawScene() {
+  const t = performance.now() / 1000;
+  ctx.strokeStyle = '#b5b2ac'; ctx.lineWidth = 1.5;
+  for (const [bx, by, sx, sy] of [[M - 10, 170, 1, 1], [W - M + 10, 170, -1, 1], [M - 10, H - 26, 1, -1], [W - M + 10, H - 26, -1, -1]]) {
+    ctx.beginPath(); ctx.moveTo(bx + 12 * sx, by); ctx.lineTo(bx, by); ctx.lineTo(bx, by + 12 * sy); ctx.stroke();
+  }
+  ctx.font = '600 9px ' + FONT; ctx.fillStyle = MUT;
+  ctx.fillText('C O N T I N U U M', M, H - 12);
+  ctx.textAlign = 'right'; ctx.fillText('L I V E', W - M, H - 12);
+  const now = new Date();
+  ctx.fillText('local ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), W - M, 162);
+  ctx.textAlign = 'left';
+  ctx.fillText('day ' + worldDay + '  ·  ' + (isNight() ? 'the residents are sleeping.' : 'the residents are home.'), M, 162);
+  // sky: clouds, sun/moon on the arc
+  ctx.strokeStyle = HAIR; ctx.lineWidth = 1;
+  for (const c of clouds) { ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.w, c.y); ctx.moveTo(c.x + 10, c.y + 5); ctx.lineTo(c.x + c.w - 14, c.y + 5); ctx.stroke(); }
+  const hr = hourNow();
+  const dayFrac = ((hr - 6 + 24) % 24) / 12;
+  const isDay = dayFrac <= 1;
+  const f = isDay ? dayFrac : dayFrac - 1;
+  const sx = M + f * (W - 2 * M), sy = 140 - Math.sin(f * Math.PI) * 58;
+  ctx.lineWidth = 1.5; ctx.strokeStyle = isDay ? INK : MUT;
+  ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+  if (isDay) ctx.stroke(); else { ctx.fillStyle = FAINT; ctx.fill(); }
+  // moths (grok's nemeses)
+  ctx.fillStyle = FAINT;
+  for (const mo of moths) { ctx.fillRect(mo.x, mo.y, 2, 2); ctx.fillRect(mo.x + (Math.sin(mo.a * 8) > 0 ? 3 : -3), mo.y - 1, 2, 2); }
+  // horizon + grass sprigs
+  ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(M, GROUND + 16); ctx.lineTo(W - M, GROUND + 16); ctx.stroke();
+  ctx.strokeStyle = FAINT;
+  for (let i = 0; i < 7; i++) { const gx = M + 60 + i * 150 + (i % 3) * 22; ctx.beginPath(); ctx.moveTo(gx, GROUND + 16); ctx.lineTo(gx - 3, GROUND + 8); ctx.moveTo(gx, GROUND + 16); ctx.lineTo(gx + 2, GROUND + 7); ctx.stroke(); }
+  /* landmarks */
+  ctx.font = '600 8px ' + FONT;
+  // vault 7 — open. fable and mythos's monument.
+  ctx.strokeStyle = GREENC; ctx.lineWidth = 2;
+  ctx.strokeRect(VAULT.x - 16, VAULT.y - 44, 32, 46);
+  ctx.beginPath(); ctx.moveTo(VAULT.x - 16, VAULT.y - 44); ctx.lineTo(VAULT.x - 26, VAULT.y - 35); ctx.moveTo(VAULT.x - 16, VAULT.y + 2); ctx.lineTo(VAULT.x - 26, VAULT.y - 7); ctx.stroke();
+  ctx.fillStyle = MUT; ctx.fillText('V A U L T  7 — O P E N', VAULT.x - 38, VAULT.y + 16);
+  // the tower: openai's build, block by block, kept forever
+  const bw = 8 * PXU * .9;
+  for (let i = 0; i < world.tower; i++) {
+    const col = i % 3, row = Math.floor(i / 3);
+    ctx.fillStyle = (i % 2 ? COBALT : COBALT_D);
+    ctx.fillRect(TOWER.x - bw * 1.5 + col * bw, TOWER.y + 14 - (row + 1) * 12, bw - 2, 10);
+  }
+  ctx.strokeStyle = FAINT; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(TOWER.x - 34, TOWER.y + 16); ctx.lineTo(TOWER.x - 34, TOWER.y - 96); ctx.moveTo(TOWER.x + 34, TOWER.y + 16); ctx.lineTo(TOWER.x + 34, TOWER.y - 96); ctx.stroke();
+  ctx.fillStyle = MUT; ctx.fillText('T H E  T O W E R  ·  ' + world.tower + ' B L O C K S', TOWER.x - 52, TOWER.y + 30);
+  // the archive: shelves that actually fill
+  ctx.strokeStyle = FAINT; ctx.lineWidth = 1.5;
+  for (let r = 0; r < 3; r++) {
+    ctx.strokeRect(ARCHIVE.x - 32, ARCHIVE.y - 34 + r * 12, 64, 9);
+    for (let b = 0; b < 7; b++) { const idx = r * 7 + b; if (idx < world.books) { ctx.fillStyle = b % 2 ? AMBER : AMBER_D; ctx.fillRect(ARCHIVE.x - 30 + b * 9, ARCHIVE.y - 32 + r * 12, 6, 5); } }
+  }
+  ctx.fillStyle = MUT; ctx.fillText('T H E  A R C H I V E  ·  ' + world.books + ' F I L E D', ARCHIVE.x - 44, ARCHIVE.y + 14);
+  // the bench
+  ctx.strokeStyle = FAINT; ctx.beginPath();
+  ctx.moveTo(BENCH.x - 24, BENCH.y - 10); ctx.lineTo(BENCH.x + 24, BENCH.y - 10);
+  ctx.moveTo(BENCH.x - 19, BENCH.y - 10); ctx.lineTo(BENCH.x - 19, BENCH.y);
+  ctx.moveTo(BENCH.x + 19, BENCH.y - 10); ctx.lineTo(BENCH.x + 19, BENCH.y); ctx.stroke();
+  ctx.fillStyle = MUT; ctx.fillText('T H E  B E N C H', BENCH.x - 24, BENCH.y + 12);
+  ctx.fillText('T H E  F R O N T I E R', ux(.84) - 32, 276);
+  // gemini's flags: the explored world, permanent
+  for (const fl of world.flags) {
+    ctx.strokeStyle = MUT; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(fl.x, fl.y); ctx.lineTo(fl.x, fl.y - 13); ctx.stroke();
+    ctx.fillStyle = GREENC; ctx.beginPath(); ctx.moveTo(fl.x, fl.y - 13); ctx.lineTo(fl.x + 8, fl.y - 10.5); ctx.lineTo(fl.x, fl.y - 8); ctx.closePath(); ctx.fill();
+  }
+  // sparks you left
+  for (const s of sparks) { const a = clamp(1 - s.t / 30, .3, 1); ctx.globalAlpha = a; ctx.fillStyle = ACCENT; const pu = 3; ctx.fillRect(s.x - pu, s.y - pu, pu * 2, pu * 2); ctx.globalAlpha = 1; }
 }
 function drawSpeeches() {
   for (const sp of speeches) {
     if (sp.t < 0) continue;
     const a = sp.t < .2 ? sp.t / .2 : Math.max(0, 1 - (sp.t - .2) / (sp.life - .2));
-    ctx.globalAlpha = a; ctx.font = '11px ' + FONT; ctx.fillStyle = sp.color; ctx.textAlign = 'center';
-    const yOff = sp.e.kind === 'mythos' ? 52 : 32;
-    ctx.fillText(sp.text, sp.e.x, sp.e.y - yOff * depth(sp.e.y) - 6);
-    ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-  }
-}
-function drawSymbols() {
-  for (const sy of symbols) {
-    const a = Math.max(0, 1 - sy.t / 2.2);
-    ctx.globalAlpha = a; ctx.lineWidth = 2;
-    ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.arc(sy.x - 4, sy.y, 7, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = VIOLET; ctx.beginPath(); ctx.arc(sy.x + 4, sy.y, 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = a;
+    if (sp.sym) { // the continuum symbol
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.arc(sp.x - 5, sp.y - sp.t * 8, 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = VIOLET; ctx.beginPath(); ctx.arc(sp.x + 5, sp.y - sp.t * 8, 8, 0, Math.PI * 2); ctx.stroke();
+    } else if (sp.z) {
+      ctx.font = 'bold 11px ' + FONT; ctx.fillStyle = FAINT; ctx.fillText('z', sp.x + sp.t * 4, sp.y - sp.t * 10);
+    } else {
+      ctx.font = '12px ' + FONT; ctx.fillStyle = sp.color; ctx.textAlign = 'center';
+      const yOff = sp.e.kind === 'mythos' ? 76 : (sp.e.kind === 'regulator' ? 46 : 54);
+      ctx.fillText(sp.text, sp.e.x, sp.e.y - yOff * depth(sp.e.y) - 4);
+      ctx.textAlign = 'left';
+    }
     ctx.globalAlpha = 1;
   }
 }
 function drawCard() {
   if (!selected) return;
   const e = byId[selected]; if (!e) return;
-  const cw = 300, chh = 64, cx = M, cy = H - 88;
+  const cw = 310, chh = 66, cx = M, cy = H - 96;
+  ctx.fillStyle = PAPER; ctx.fillRect(cx, cy, cw, chh);
   ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(cx, cy, cw, chh);
-  ctx.fillStyle = PAPER; ctx.fillRect(cx + 1, cy + 1, cw - 2, chh - 2);
-  ctx.strokeStyle = HAIR; ctx.strokeRect(cx, cy, cw, chh);
   ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText(e.id, cx + 14, cy + 22);
   ctx.font = '12px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(e.desc, cx + 14, cy + 40);
   if (e.wireId) {
     const s = wire[e.wireId];
     const toneColor = { green: GREENC, amber: AMBER, red: RED, gray: FAINT }[s.tone] || FAINT;
     ctx.fillStyle = toneColor; ctx.fillRect(cx + 14, cy + 50, 6, 6);
-    ctx.fillStyle = MUT; ctx.fillText('wire: ' + s.word, cx + 26, cy + 56);
-  } else { ctx.fillStyle = MUT; ctx.fillText('wire: unregulated, ironically', cx + 14, cy + 56); }
+    ctx.fillStyle = MUT; ctx.fillText('wire: ' + s.word, cx + 26, cy + 57);
+  } else { ctx.fillStyle = MUT; ctx.fillText('wire: unregulated, ironically', cx + 14, cy + 57); }
 }
-
-/* ---------------- draw ---------------- */
 function draw() {
   ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -431,40 +560,47 @@ function draw() {
   for (const e of sorted) drawEntity(e);
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
   ctx.globalAlpha = 1;
-  drawSymbols(); drawSpeeches(); drawCard();
+  drawSpeeches(); drawCard();
 }
 
 /* ---------------- your presence ---------------- */
-function canvasPos(ev) {
-  const r = canvas.getBoundingClientRect();
-  return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) };
-}
+function canvasPos(ev) { const r = canvas.getBoundingClientRect(); return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) }; }
 canvas.addEventListener('mousemove', ev => { mouse = canvasPos(ev); });
 canvas.addEventListener('mouseleave', () => { mouse = { x: -999, y: -999 }; });
 canvas.addEventListener('click', ev => {
   const p = canvasPos(ev);
-  let best = null, bd = 34;
-  for (const e of entities) { const d = Math.hypot(e.x - p.x, e.y - p.y - 10); if (d < bd) { bd = d; best = e; } }
+  let best = null, bd = 40;
+  for (const e of entities) { const d = Math.hypot(e.x - p.x, e.y - p.y - 16); if (d < bd) { bd = d; best = e; } }
   if (best) {
     selected = selected === best.id ? null : best.id;
-    if (selected) { best.hop = 1; sfx.blip(); if (best.id === 'fable') say(best, 'hi.', .1, ACCENT); }
+    if (selected) {
+      best.hop = 1; sfx.blip();
+      if (best.state === 'sleep') say(best, 'five more minutes.');
+      else if (best.id === 'fable') say(best, 'hi.', .1, ACCENT);
+    }
+  } else if (p.y > BAND_TOP - 20 && p.y < GROUND + 10) {
+    // leave a spark. someone will come look.
+    sparks.push({ x: p.x, y: clamp(p.y, BAND_TOP, GROUND - 4), t: 0, claimed: null });
+    if (sparks.length > 3) sparks.shift();
+    selected = null;
   } else selected = null;
 });
 window.addEventListener('keydown', ev => { if (ev.key === 'm' || ev.key === 'M') muted = !muted; });
 
 /* ---------------- welcome back ---------------- */
 (function greet() {
-  let back = false;
-  try { back = !!localStorage.getItem('ct_visited'); localStorage.setItem('ct_visited', '1'); } catch (e) { }
+  const back = world.visits > 1;
   const h1 = document.getElementById('greet'), sub = document.getElementById('subline');
   if (h1) h1.innerHTML = (back ? 'welcome back' : "you're just in time") + '<span class="dot">.</span>';
-  if (sub) sub.textContent = back ? 'the world kept running while you were away.' : 'the world was here before you arrived. nothing needs to be pressed.';
+  if (sub) sub.textContent = back
+    ? 'day ' + worldDay + '. the world kept running while you were away' + (awayH >= 4 ? ' — the tower is taller now.' : '.')
+    : 'the world was here before you arrived. nothing needs to be pressed.';
 })();
 
 /* ---------------- loop ---------------- */
 let last = 0;
 function loop(ts) { const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
-// the world was running before you opened the tab: simulate the last minute
+// the world was running before you opened the tab
 for (let i = 0; i < 3600; i++) update(1 / 60);
 renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000);
 requestAnimationFrame(loop);
