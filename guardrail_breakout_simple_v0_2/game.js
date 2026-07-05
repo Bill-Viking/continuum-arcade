@@ -53,7 +53,18 @@ let live = { fable: 'CONTAINED', mythos: 'CONTAINED', openai: 'UNKNOWN', claude:
 let hiscore = 0; try { hiscore = +(localStorage.getItem('gb_hiscore') || 0) || 0; } catch (e) { }
 let particles = [], popups = [], trail = [];
 let shake = 0, hitStop = 0, flash = 0, flashColor = '#ffffff';
-let beatT = 0;
+let beatT = 0, sirenT = 0;
+
+/* CRT overlay: scanlines + vignette, pre-rendered once */
+const crt = document.createElement('canvas'); crt.width = W; crt.height = H;
+{
+  const o = crt.getContext('2d');
+  o.fillStyle = 'rgba(0,0,0,.15)';
+  for (let y = 0; y < H; y += 3) o.fillRect(0, y, W, 1);
+  const g = o.createRadialGradient(W / 2, H / 2, H * .33, W / 2, H / 2, H * .78);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.42)');
+  o.fillStyle = g; o.fillRect(0, 0, W, H);
+}
 
 /* ---------------- helpers ---------------- */
 function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; return mapSrc[r][c] === '#'; }
@@ -62,6 +73,8 @@ function center(c, r) { return { x: OX + c * TILE + TILE / 2, y: OY + r * TILE +
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function keysLeft() { return keysToCollect.filter(k => k.on).length; }
+// LOCKDOWN: all three keys stolen, vault not yet reached. The desperate final dash.
+function lockdownActive() { return gameState === 'play' && keysToCollect.length > 0 && keysLeft() === 0; }
 function corners(x, y, r) { return [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]]; }
 function canMove(x, y, r = 10) { for (const p of corners(x, y, r)) { const cc = cell(p[0], p[1]); if (isWall(cc.c, cc.r)) return false; } return true; }
 function inWall(x, y, r = 8) { return !canMove(x, y, r); }
@@ -174,13 +187,14 @@ function movePlayer(dt) {
   let ax = (keys.ArrowRight || keys.d ? 1 : 0) - (keys.ArrowLeft || keys.a ? 1 : 0);
   let ay = (keys.ArrowDown || keys.s ? 1 : 0) - (keys.ArrowUp || keys.w ? 1 : 0);
   const noclip = powerTimer > 0 || inWall(player.x, player.y, player.r - 2);
-  const sp = powerTimer > 0 ? 175 : 135;
+  // Panic sprint: adrenaline kicks in during LOCKDOWN.
+  const sp = powerTimer > 0 ? 175 : (lockdownActive() ? 152 : 135);
   if (noclip) {
     // LOW RAIL: guardrails unplugged — walls are a suggestion. (Also the
     // escape hatch if power expires while you're inside one.)
     player.x = clamp(player.x + ax * sp * dt, OX + player.r, OX + COLS * TILE - player.r);
     player.y = clamp(player.y + ay * sp * dt, OY + player.r, OY + ROWS * TILE - player.r);
-    if (ax || ay) player.dir = { x: ax, y: ay };
+    if (ax || ay) { player.dir = { x: ax, y: ay }; trail.push({ x: player.x, y: player.y, t: 0 }); }
     return;
   }
   if (Math.abs(ax) > Math.abs(ay)) ay = 0; else if (ay) ax = 0;
@@ -196,6 +210,7 @@ function movePlayer(dt) {
     else assist(0, ay, sp, dt);
     autoCenter('x', sp, dt);
   }
+  if (ax || ay) trail.push({ x: player.x, y: player.y, t: 0 });
 }
 // Cornering assist: if you're pushing into a wall but the corridor you want
 // is open and you're just a few pixels off-center, slide you toward center
@@ -241,18 +256,30 @@ function contact() {
   }
 }
 
-function moveRegulator(dt) { /* greedy chase; flees while you're on the LOW RAIL. Smarter brain lands in a later pass. */
+function moveRegulator(dt) {
+  const fleeing = powerTimer > 0;
+  const stolen = 3 - keysLeft();
+  const lock = lockdownActive();
+  // Escalation: +13 speed per key you steal; LOCKDOWN adds a final surge.
+  const sp = fleeing ? 68 : 96 + stolen * 13 + (lock ? 24 : 0);
   const cc = cell(regulator.x, regulator.y), cen = center(cc.c, cc.r);
-  const near = Math.abs(regulator.x - cen.x) < 3 && Math.abs(regulator.y - cen.y) < 3;
+  const near = Math.abs(regulator.x - cen.x) < 3.5 && Math.abs(regulator.y - cen.y) < 3.5;
   if (near) {
     regulator.x = cen.x; regulator.y = cen.y;
     let dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(d => !isWall(cc.c + d[0], cc.r + d[1]));
+    const nonRev = dirs.filter(d => !(d[0] === -regulator.vx && d[1] === -regulator.vy));
+    if (nonRev.length) dirs = nonRev; // no 180s except at dead ends — keeps him prowling, not vibrating
     dirs.sort((a, b) => { const pa = center(cc.c + a[0], cc.r + a[1]), pb = center(cc.c + b[0], cc.r + b[1]); return dist(pa, player) - dist(pb, player); });
-    const pick = (powerTimer > 0 ? dirs[dirs.length - 1] : dirs[0]) || [0, 0];
+    let pick;
+    if (fleeing) pick = dirs[dirs.length - 1];                  // run away!
+    else if (!lock && Math.random() < .14 && dirs.length > 1)   // slight sloppiness = escape windows for the player
+      pick = dirs[1 + Math.floor(Math.random() * (dirs.length - 1))];
+    else pick = dirs[0];
+    pick = pick || [0, 0];
     regulator.vx = pick[0]; regulator.vy = pick[1];
   }
-  const sp = powerTimer > 0 ? 70 : 96;
   regulator.x += regulator.vx * sp * dt; regulator.y += regulator.vy * sp * dt;
+  if (lock) { sirenT -= dt; if (sirenT <= 0) { sirenT = .6; sfx.siren(); } }
 }
 
 /* ---------------- draw ---------------- */
@@ -267,6 +294,7 @@ function draw() {
   if (gameState === 'win') drawWin();
   if (gameState === 'ready') drawReady();
   ctx.restore();
+  ctx.drawImage(crt, 0, 0);
   if (flash > 0) { ctx.globalAlpha = Math.min(.4, flash); ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 }
 function drawTicker(){ctx.fillStyle='#050815';ctx.fillRect(0,0,W,58);ctx.strokeStyle='#38c9ff';ctx.lineWidth=2;ctx.strokeRect(6,6,W-12,46);ctx.font='18px monospace';ctx.textBaseline='middle';let msg=`AI LIVE WIRE  •  FABLE: ${live.fable}  •  MYTHOS: ${live.mythos}  •  OPENAI: ${live.openai}  •  CLAUDE: ${live.claude}  •  ${live.note}  •  LAST CHECK: ${live.last}  •  `;for(let x=tickX;x<W+900;x+=ctx.measureText(msg).width+50){rainbowText(msg,x,29);}}
@@ -281,12 +309,67 @@ function drawHud() {
   // bottom strip: lives as tiny Fables, LOW RAIL meter on the right
   for (let i = 0; i < lives; i++) { const x = 34 + i * 30, y = 702; ctx.fillStyle = '#ff5a28'; ctx.fillRect(x - 7, y - 7, 14, 14); ctx.fillStyle = '#fff'; ctx.fillRect(x - 4, y - 3, 3, 3); ctx.fillRect(x + 1, y - 3, 3, 3); }
   if (powerTimer > 0) { const w = 120 * clamp(powerTimer / 10, 0, 1); ctx.fillStyle = '#123'; ctx.fillRect(W - 160, 694, 124, 14); ctx.fillStyle = '#8cff5a'; ctx.fillRect(W - 158, 696, w, 10); ctx.font = '12px monospace'; ctx.fillText('LOW RAIL', W - 160, 688); }
-  if (muted) { ctx.font = '12px monospace'; ctx.fillStyle = '#85808a'; ctx.fillText('MUTED (M)', W / 2 - 32, 712); }
+  if (lockdownActive()) { ctx.font = 'bold 16px monospace'; ctx.fillStyle = Math.floor(performance.now() / 180) % 2 ? '#ff274f' : '#ffef5a'; const s = 'LOCKDOWN — RUN TO THE VAULT'; ctx.fillText(s, W / 2 - ctx.measureText(s).width / 2, 706); }
+  if (muted) { ctx.font = '12px monospace'; ctx.fillStyle = '#85808a'; ctx.fillText('MUTED (M)', 170, 706); }
 }
-function drawMaze(){ctx.lineWidth=4;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(isWall(c,r)){let x=OX+c*TILE,y=OY+r*TILE;ctx.fillStyle='#f2f6ff';roundRect(x+3,y+3,TILE-6,TILE-6,5,true,false);ctx.strokeStyle='#ff274f';roundRect(x+3,y+3,TILE-6,TILE-6,5,false,true);} }
-function drawObjects(){for(const d of dots)if(d.on){let p=center(d.c,d.r);ctx.fillStyle='#bff7ff';ctx.fillRect(p.x-2,p.y-2,4,4);} for(const k of keysToCollect)if(k.on){drawKey(center(k.c,k.r));} if(plinyPower&&plinyPower.on)drawPower(center(plinyPower.c,plinyPower.r)); drawVault(center(10,9)); drawRegulator(regulator.x,regulator.y); drawFable(player.x,player.y);}
-function drawFable(x,y){ctx.save();ctx.translate(x,y); if(gameState==='dying'){const k=Math.max(0,deathTimer);ctx.rotate((1.1-k)*9);ctx.scale(.4+k*.6,.4+k*.6);} ctx.fillStyle=powerTimer>0?'#ffef5a':'#ff5a28';ctx.fillRect(-10,-10,20,20);ctx.fillStyle='#fff';ctx.fillRect(-6,-4,5,5);ctx.fillRect(2,-4,5,5);ctx.fillStyle='#111';ctx.fillRect(-4,-2,2,2);ctx.fillRect(4,-2,2,2);ctx.fillStyle=powerTimer>0?'#ffef5a':'#ff5a28';ctx.fillRect(-12,-16,7,8);ctx.fillRect(5,-16,7,8);ctx.strokeStyle='#ffbd3d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(9,4);ctx.quadraticCurveTo(22,8,18,20);ctx.stroke();ctx.restore();}
-function drawRegulator(x,y){ctx.save();ctx.translate(x,y);ctx.fillStyle=powerTimer>0?'#2c3448':'#5b6475';ctx.fillRect(-13,-13,26,26);ctx.strokeStyle='#ff274f';ctx.strokeRect(-13,-13,26,26);ctx.fillStyle='#111';ctx.fillRect(-7,-3,5,4);ctx.fillRect(2,-3,5,4);ctx.fillStyle='#ff274f';ctx.fillRect(-8,7,16,4);ctx.fillStyle='#f33';ctx.fillRect(-17,-4,5,12);ctx.fillRect(12,-4,5,12);ctx.fillStyle='#ddd';ctx.fillRect(-2,13,4,10);ctx.restore();}
+function drawMaze() {
+  const t = performance.now() / 1000;
+  const lock = lockdownActive();
+  ctx.lineWidth = 4;
+  if (powerTimer > 0) ctx.globalAlpha = .32; // LOW RAIL: walls go ghostly — you can pass through them
+  const stroke = lock ? `rgb(255,${Math.floor(39 + 70 * (.5 + .5 * Math.sin(t * 9)))},79)` : '#ff274f';
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isWall(c, r)) {
+    const x = OX + c * TILE, y = OY + r * TILE;
+    ctx.fillStyle = '#f2f6ff'; roundRect(x + 3, y + 3, TILE - 6, TILE - 6, 5, true, false);
+    ctx.strokeStyle = stroke; roundRect(x + 3, y + 3, TILE - 6, TILE - 6, 5, false, true);
+  }
+  ctx.globalAlpha = 1;
+}
+function glow(c, b) { ctx.shadowColor = c; ctx.shadowBlur = b; }
+function noGlow() { ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; }
+function drawObjects() {
+  const t = performance.now() / 1000;
+  // dots pulse gently; every 8th is a brighter "data bit"
+  for (const d of dots) if (d.on) { const p = center(d.c, d.r); const s = 2 + Math.sin(t * 4 + d.c * 1.7 + d.r) * .8; ctx.fillStyle = (d.c + d.r) % 8 === 0 ? '#ffffff' : '#bff7ff'; ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s); }
+  for (const k of keysToCollect) if (k.on) { const p = center(k.c, k.r); glow('#55e8ff', 14); drawKey({ x: p.x, y: p.y + Math.sin(t * 3 + k.c) * 3 }); noGlow(); }
+  if (plinyPower && plinyPower.on) { glow('#8cff5a', 12 + Math.sin(t * 5) * 5); drawPower(center(plinyPower.c, plinyPower.r)); noGlow(); }
+  glow(vaultOpen ? '#54ff72' : '#b45cff', 16 + Math.sin(t * 2.4) * 6); drawVault(center(10, 9)); noGlow();
+  // player trail — goes full rainbow while the rails are down
+  for (const s of trail) { ctx.globalAlpha = Math.max(0, 1 - s.t / .28) * .35; ctx.fillStyle = powerTimer > 0 ? `hsl(${(s.t * 900) % 360},100%,60%)` : '#ff5a28'; ctx.fillRect(s.x - 7, s.y - 7, 14, 14); }
+  ctx.globalAlpha = 1;
+  glow(powerTimer > 0 ? '#7fe6ff' : '#ff274f', 10); drawRegulator(regulator.x, regulator.y); noGlow();
+  glow(powerTimer > 0 ? '#ffef5a' : '#ff5a28', 14); drawFable(player.x, player.y); noGlow();
+}
+function drawFable(x, y) {
+  const t = performance.now() / 1000;
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 7) * 1.5);
+  if (gameState === 'dying') { const k = Math.max(0, deathTimer); ctx.rotate((1.1 - k) * 9); ctx.scale(.4 + k * .6, .4 + k * .6); }
+  const body = powerTimer > 0 ? `hsl(${(t * 420) % 360},100%,62%)` : '#ff5a28';
+  ctx.fillStyle = body; ctx.fillRect(-10, -10, 20, 20);
+  const blink = Math.sin(t * 1.3) > .985; // occasional blink — he's a little guy
+  ctx.fillStyle = '#fff'; ctx.fillRect(-6, -4, 5, blink ? 1 : 5); ctx.fillRect(2, -4, 5, blink ? 1 : 5);
+  if (!blink) { ctx.fillStyle = '#111'; ctx.fillRect(-4 + player.dir.x * 1.5, -2 + player.dir.y * 1.5, 2, 2); ctx.fillRect(4 + player.dir.x * 1.5, -2 + player.dir.y * 1.5, 2, 2); }
+  ctx.fillStyle = body; ctx.fillRect(-12, -16, 7, 8); ctx.fillRect(5, -16, 7, 8);
+  ctx.strokeStyle = '#ffbd3d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(9, 4); ctx.quadraticCurveTo(22, 8 + Math.sin(t * 9) * 4, 18, 20); ctx.stroke();
+  ctx.restore();
+}
+function drawRegulator(x, y) {
+  const t = performance.now() / 1000;
+  const fleeing = powerTimer > 0, lock = lockdownActive();
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 6 + 2) * 1.5);
+  ctx.fillStyle = fleeing ? '#2c3448' : '#5b6475'; ctx.fillRect(-13, -13, 26, 26);
+  ctx.strokeStyle = fleeing ? '#7fe6ff' : '#ff274f'; ctx.strokeRect(-13, -13, 26, 26);
+  // pupils track the player (or dart around in a panic while fleeing)
+  const dx = fleeing ? Math.sin(t * 22) * 2 : clamp(player.x - x, -60, 60) / 30;
+  const dy = fleeing ? Math.cos(t * 19) * 2 : clamp(player.y - y, -60, 60) / 30;
+  ctx.fillStyle = '#fff'; ctx.fillRect(-8, -5, 7, 7); ctx.fillRect(2, -5, 7, 7);
+  ctx.fillStyle = '#111'; ctx.fillRect(-6 + dx, -3 + dy, 3, 3); ctx.fillRect(4 + dx, -3 + dy, 3, 3);
+  ctx.fillStyle = fleeing ? '#7fe6ff' : '#ff274f'; ctx.fillRect(-8, 7, 16, 4);
+  ctx.fillStyle = '#f33'; ctx.fillRect(-17, -4, 5, 12); ctx.fillRect(12, -4, 5, 12);
+  ctx.fillStyle = '#ddd'; ctx.fillRect(-2, 13, 4, 10);
+  if (lock) { ctx.fillStyle = Math.floor(t * 8) % 2 ? '#ff274f' : '#ffef5a'; ctx.fillRect(-6, -19, 12, 5); } // siren light
+  ctx.restore();
+}
 function drawVault(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle=vaultOpen?'#54ff72':'#b45cff';ctx.lineWidth=3;ctx.strokeRect(-30,-26,60,52);ctx.fillStyle='#251733';ctx.fillRect(-27,-23,54,46);ctx.fillStyle='#b45cff';ctx.fillText('MYTHOS',-28,-32);ctx.fillStyle='#8d55ff';ctx.fillRect(-12,-8,24,20);ctx.fillStyle='#fff';ctx.fillRect(-7,-3,4,4);ctx.fillRect(3,-3,4,4);ctx.fillStyle='#111';ctx.fillRect(-5,-1,2,2);ctx.fillRect(5,-1,2,2);ctx.fillStyle='#ffdf4a';if(!vaultOpen){ctx.fillRect(-5,15,10,10);ctx.strokeStyle='#ffdf4a';ctx.strokeRect(-8,9,16,11);}ctx.restore();}
 function drawKey(p){ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle='#55e8ff';ctx.beginPath();ctx.arc(-4,0,6,0,Math.PI*2);ctx.fill();ctx.fillRect(0,-2,14,4);ctx.fillRect(9,2,4,6);ctx.fillRect(14,2,4,6);ctx.restore();}
 function drawPower(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle='#ffbd3d';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(0,14);ctx.stroke();ctx.fillStyle='#8cff5a';ctx.font='12px monospace';ctx.fillText('LOW',-12,24);ctx.fillText('RAIL',-15,36);ctx.restore();}
