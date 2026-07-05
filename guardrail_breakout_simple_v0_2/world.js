@@ -122,7 +122,9 @@ function showWireDetail(id, refresh) {
   if (s.incidents && s.incidents.length) h += 'open incidents: ' + s.incidents.map(i => `<a href="${i.url}" target="_blank" rel="noopener">${i.name.toLowerCase()}</a>`).join(' · ') + '<br>';
   if (n && n.items.length) h += 'on the news wire (48h): ' + n.items.map(it => `<a href="${it.url}" target="_blank" rel="noopener">${it.title.toLowerCase().slice(0, 70)}${it.title.length > 70 ? '…' : ''}</a> <a href="${it.hn}" target="_blank" rel="noopener">(hn ${it.points})</a>`).join('<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;') + '<br>';
   else h += 'nothing on the news wire in the last 48 hours.<br>';
-  if (e) h += `in the world: ${e.id} is ${stateWord(e)}.`;
+  // hard line between fact and theater: everything above is real and linked;
+  // the mascot's day is fiction and says so.
+  if (e) h += `<span style="color:#C9C9C9">meanwhile, in the terrarium: the ${e.id} mascot is ${stateWord(e)} — fiction. only the linked items above are facts.</span>`;
   el.innerHTML = h; el.style.display = 'block';
 }
 let wireIdx = 0;
@@ -514,7 +516,9 @@ function stateWord(e) {
     if (e.id === 'fable' && Math.hypot(t.x - m.x, t.y - m.y) < 70) return 'going to see mythos';
     return e.kind === 'explorer' ? 'out charting' : e.kind === 'wildcard' ? 'up to something' : 'out for a walk';
   }
-  return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying', tinkerer: 'mid-repair', wildcard: 'plotting', regulator: 'on patrol' }[e.kind] || 'idle';
+  // idle words are chosen to never collide with status vocabulary —
+  // nothing here should be mistakable for a claim about the real service
+  return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying the shelves', tinkerer: 'tinkering at his bench', wildcard: 'plotting', regulator: 'on patrol' }[e.kind] || 'idle';
 }
 const bornAt = performance.now();
 const INTRO = [
