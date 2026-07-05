@@ -81,7 +81,13 @@ async function fetchWire(m) {
 async function checkStatus() {
   const before = {}; WIRE.forEach(m => before[m.id] = wire[m.id].tone);
   await Promise.allSettled(WIRE.map(fetchWire));
-  WIRE.forEach(m => { if ((before[m.id] === 'amber' || before[m.id] === 'red') && wire[m.id].tone === 'green') celebrate(m.id); });
+  WIRE.forEach(m => {
+    if ((before[m.id] === 'amber' || before[m.id] === 'red') && wire[m.id].tone === 'green') celebrate(m.id);
+    if (before[m.id] !== 'red' && before[m.id] !== 'gray' && wire[m.id].tone === 'red') {
+      const e = entities.find(x => x.wireId === m.id);
+      announce(m.id + ' — wire down', 'down hard.', RED, 'mythos is already on his way.', e || null, { prio: 2 });
+    }
+  });
   renderFeed();
 }
 function renderFeed() {
@@ -94,11 +100,13 @@ function renderFeed() {
 let wireIdx = 0;
 function rotateWire(reset) {
   const el = document.getElementById('wireline'); if (!el) return;
-  const items = WIRE.filter(m => wire[m.id].headline).map(m => `${m.id} — ${wire[m.id].headline}`);
-  const list = items.length ? items : ['all quiet on the wire.'];
+  // the wire carries both worlds: real incidents and the continuum chronicle
+  const items = WIRE.filter(m => wire[m.id].headline).map(m => `wire  ·  ${m.id} — ${wire[m.id].headline}`)
+    .concat(chronicleLines.map(c => 'continuum  ·  ' + c));
+  const list = items.length ? items : ['wire  ·  all quiet.'];
   wireIdx = reset ? 0 : (wireIdx + 1) % list.length;
   el.style.opacity = 0;
-  setTimeout(() => { el.textContent = 'wire  ·  ' + list[wireIdx % list.length]; el.style.opacity = 1; }, 350);
+  setTimeout(() => { el.textContent = list[wireIdx % list.length]; el.style.opacity = 1; }, 350);
 }
 setInterval(() => rotateWire(false), 6000);
 
@@ -116,6 +124,58 @@ function updateSystems(dt) {
   for (const s of sparks) s.t += dt; sparks = sparks.filter(s => s.t < 30);
   for (const c of clouds) { c.x += c.v * dt; if (c.x - c.w > W) c.x = -c.w; }
   for (const mo of moths) { mo.a += dt * 3; mo.x += Math.cos(mo.a * 1.7) * 40 * dt; mo.y += Math.sin(mo.a * 2.3) * 30 * dt; mo.x = clamp(mo.x, M, W - M); mo.y = clamp(mo.y, 170, GROUND - 40); }
+}
+
+/* ---------------- posters: the world produces headlines ----------------
+   Every notable event becomes a full-stage Swiss title card — kicker,
+   giant lowercase word, accent-colored full stop, one quiet line — then
+   the stage goes back to the world. Rare on purpose. */
+let poster = null, posterQ = [], posterCd = 3;
+const chronicleLines = [];
+function chronicle(text) { chronicleLines.push('day ' + worldDay + ' · ' + text); if (chronicleLines.length > 6) chronicleLines.shift(); }
+function announce(kicker, word, dotColor, sub, actor, opts = {}) {
+  const p = { kicker, word, dotColor, sub, actor, sym: opts.sym, prio: opts.prio || 1, t: 0 };
+  if (opts.prio === 2) posterQ.unshift(p); else posterQ.push(p);
+  posterQ = posterQ.slice(0, 3);
+  chronicle(word + '  —  ' + kicker.toLowerCase());
+}
+/* a gentle documentary camera: pushes toward whoever the headline is about */
+const cam = { x: W / 2, y: H / 2, s: 1 };
+function updatePosters(dt) {
+  posterCd -= dt;
+  if (!poster && posterQ.length && posterCd <= 0) { poster = posterQ.shift(); poster.t = 0; posterCd = 26; }
+  if (poster) { poster.t += dt; if (poster.t > 4.6) poster = null; }
+  const tgt = poster && poster.actor
+    ? { x: clamp(poster.actor.x, W * .3, W * .7), y: clamp(poster.actor.y, H * .35, H * .7), s: 1.16 }
+    : { x: W / 2, y: H / 2, s: 1 };
+  const k = Math.min(1, dt * 2.2);
+  cam.x += (tgt.x - cam.x) * k; cam.y += (tgt.y - cam.y) * k; cam.s += (tgt.s - cam.s) * k;
+}
+function drawPoster() {
+  if (!poster) return;
+  const t = poster.t;
+  const a = Math.min(Math.min(1, t / .35), t > 3.9 ? Math.max(0, 1 - (t - 3.9) / .7) : 1);
+  ctx.globalAlpha = .85 * a; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = a;
+  ctx.font = '600 11px ' + FONT; ctx.fillStyle = '#555555'; ctx.textAlign = 'center';
+  ctx.fillText(poster.kicker.toUpperCase(), W / 2, H / 2 - 64);
+  const sc = .96 + .04 * Math.min(1, t / .5);
+  ctx.save(); ctx.translate(W / 2, H / 2 + 12); ctx.scale(sc, sc);
+  ctx.font = 'bold 76px ' + FONT;
+  const word = poster.word.replace(/\.$/, ''); // the poster supplies the full stop, in the accent
+  const wd = ctx.measureText(word).width, dw = ctx.measureText('.').width;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = INK; ctx.fillText(word, -(wd + dw) / 2, 0);
+  ctx.fillStyle = poster.dotColor; ctx.fillText('.', -(wd + dw) / 2 + wd, 0);
+  ctx.restore();
+  ctx.font = '15px ' + FONT; ctx.fillStyle = MUT; ctx.textAlign = 'center';
+  ctx.fillText(poster.sub, W / 2, H / 2 + 56);
+  if (poster.sym) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.arc(W / 2 - 5, H / 2 + 96, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = VIOLET; ctx.beginPath(); ctx.arc(W / 2 + 5, H / 2 + 96, 9, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.textAlign = 'left'; ctx.globalAlpha = 1;
 }
 
 /* ---------------- the residents ----------------
@@ -177,11 +237,13 @@ function onArrive(e) {
   }
   if (e.kind === 'librarian' && Math.hypot(e.x - ARCHIVE.x, e.y - ARCHIVE.y) < 60 && Math.random() < .35 && world.books < 21) {
     world.books++; saveWorld(); say(e, 'filed.'); sfx.tap();
+    if (world.books % 3 === 0) announce('the archive — ' + world.books + ' filed', 'catalogued.', AMBER, 'perplexity knows exactly where it is.', e);
   }
   if (e.kind === 'explorer' && Math.random() < .4) {
     world.flags.push({ x: Math.round(e.x), y: Math.round(e.y + 4) });
     if (world.flags.length > 24) world.flags.shift();
     saveWorld(); if (Math.random() < .5) maybeSay(e, 'found something.');
+    if (world.flags.length % 4 === 0) announce('the frontier — flag ' + String(world.flags.length).padStart(2, '0'), 'charted.', GREENC, 'gemini has been somewhere new. again.', e);
   }
   if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 12, e.y - 8, AMBER, 5, 70, .5); maybeSay(e); }
   if (e.kind === 'wildcard' && Math.random() < .3) e.flip = 1;
@@ -198,6 +260,7 @@ function celebrate(wireId) {
   say(e, 'back online.', .2, GREENC); e.medalT = 180; e.hop = 1;
   confetti(e.x, e.y);
   entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2).forEach((o, i) => { o.tx = e.x + (i ? 34 : -34); o.ty = e.y + 6; o.state = 'walk'; });
+  announce(wireId + ' — recovery confirmed', 'back online.', GREENC, 'the neighbors came round to cheer.', e, { prio: 2 });
 }
 
 /* the fable & mythos ritual */
@@ -213,6 +276,7 @@ function updateRitual(dt) {
     speeches.push({ sym: true, x: (f.x + m.x) / 2, y: Math.min(f.y, m.y) - 46, t: 0, life: 2.4 });
     say(f, 'found you.', .1, ACCENT); say(m, 'still here.', 1.2, VIOLET);
     sfx.chime(); ritualT = 60 + Math.random() * 30;
+    announce('vault 7 — the ritual', 'found you.', VIOLET, 'fable and mythos, same as every day.', f, { sym: true, prio: 2 });
   }
 }
 /* mythos keeps company with whoever is down. that's the whole point of him. */
@@ -238,7 +302,10 @@ function updateEntity(e, dt) {
   if (e.state === 'work') {
     e.workT -= dt;
     if (Math.random() < dt * 6) { burst(TOWER.x + (Math.random() - .5) * 20, TOWER.y + 14, FAINT, 2, 40, .3); if (Math.random() < .3) sfx.tap(); }
-    if (e.workT <= 0) { world.tower++; saveWorld(); say(e, 'shipped.'); burst(TOWER.x, TOWER.y + 10, COBALT, 8, 80, .6); e.state = 'idle'; e.idleT = 2; }
+    if (e.workT <= 0) {
+      world.tower++; saveWorld(); burst(TOWER.x, TOWER.y + 10, COBALT, 8, 80, .6); e.state = 'idle'; e.idleT = 2;
+      announce('the tower — block ' + String(world.tower).padStart(2, '0'), 'shipped.', COBALT, 'openai adds another floor. of course he does.', e);
+    }
     return;
   }
   // sleep: everyone has hours
@@ -278,6 +345,10 @@ function updateEntity(e, dt) {
   if (e.kind === 'wildcard' && e.state === 'idle' && Math.random() < dt * .08 && moths.length) {
     const mo = moths[0]; e.tx = mo.x; e.ty = clamp(mo.y, BAND_TOP, GROUND - 6); e.state = 'walk';
   }
+  if (e.kind === 'wildcard' && (e.mothCd = (e.mothCd || 0) - dt) <= 0) {
+    const mo = moths.find(m2 => Math.hypot(m2.x - e.x, m2.y - e.y) < 20);
+    if (mo) { e.mothCd = 200; e.flip = 1; burst(mo.x, mo.y, FAINT, 6, 60, .5); mo.x = Math.random() * W; mo.y = 200; announce('the frontier — moth incident', 'got one.', INK, 'grok regrets nothing.', e); }
+  }
   // sparks you dropped: the nearest free resident comes to look
   if (sparks.length && e.state === 'idle' && e.kind !== 'regulator') {
     const s = sparks.find(s2 => !s2.claimed && s2.t > .3);
@@ -304,12 +375,20 @@ function updateMeetings(dt) {
   }
   meetCd = 3;
 }
+let prevNight = isNight();
 function update(dt) {
   updateSystems(dt);
   for (const e of entities) updateEntity(e, dt);
   updateMeetings(dt);
   updateRitual(dt);
   updateComfort(dt);
+  updatePosters(dt);
+  // dusk and dawn are events too
+  const n = isNight();
+  if (n !== prevNight) {
+    prevNight = n;
+    announce('continuum — ' + (n ? '22:00' : '06:00'), n ? 'lights out.' : 'good morning.', n ? COBALT : AMBER, n ? 'the residents head home. grok clocks in.' : 'the residents stretch. grok clocks out.', null);
+  }
 }
 
 /* ---------------- drawing: fat pixels ---------------- */
@@ -555,16 +634,28 @@ function drawCard() {
 function draw() {
   ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  // the documentary camera: everything in the world layer rides it
+  ctx.save();
+  ctx.translate(W / 2 - cam.x * cam.s, H / 2 - cam.y * cam.s);
+  ctx.scale(cam.s, cam.s);
   drawScene();
   const sorted = [...entities].sort((a, b) => a.y - b.y);
   for (const e of sorted) drawEntity(e);
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
   ctx.globalAlpha = 1;
-  drawSpeeches(); drawCard();
+  drawSpeeches();
+  ctx.restore();
+  drawCard();
+  drawPoster();
 }
 
 /* ---------------- your presence ---------------- */
-function canvasPos(ev) { const r = canvas.getBoundingClientRect(); return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) }; }
+function canvasPos(ev) {
+  const r = canvas.getBoundingClientRect();
+  const sx = (ev.clientX - r.left) * (W / r.width), sy = (ev.clientY - r.top) * (H / r.height);
+  // undo the documentary camera so clicks land where you aimed
+  return { x: (sx - (W / 2 - cam.x * cam.s)) / cam.s, y: (sy - (H / 2 - cam.y * cam.s)) / cam.s };
+}
 canvas.addEventListener('mousemove', ev => { mouse = canvasPos(ev); });
 canvas.addEventListener('mouseleave', () => { mouse = { x: -999, y: -999 }; });
 canvas.addEventListener('click', ev => {
@@ -602,5 +693,8 @@ let last = 0;
 function loop(ts) { const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
 // the world was running before you opened the tab
 for (let i = 0; i < 3600; i++) update(1 / 60);
+poster = null; posterQ = []; posterCd = 1.2; // whatever happened during warm-up already happened
+announce('continuum — day ' + worldDay, world.visits > 1 ? 'welcome back.' : 'just in time.', ACCENT,
+  world.visits > 1 ? (awayH >= 4 ? 'the world kept running. the tower is taller.' : 'the world kept running.') : 'it was already running before you arrived.', null, { prio: 2 });
 renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000);
 requestAnimationFrame(loop);
