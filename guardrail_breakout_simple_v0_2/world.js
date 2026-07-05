@@ -409,7 +409,7 @@ function announce(kicker, word, dotColor, sub, actor, opts = {}) {
 const cam = { x: W / 2, y: H / 2, s: 1 };
 function updatePosters(dt) {
   posterCd -= dt;
-  if (!poster && posterQ.length && posterCd <= 0) { poster = posterQ.shift(); poster.t = 0; posterCd = 26; }
+  if (!poster && posterQ.length && posterCd <= 0) { poster = posterQ.shift(); poster.t = 0; posterCd = 40; }
   if (poster) { poster.t += dt; if (poster.t > 4.6) poster = null; }
   const tgt = poster && poster.actor
     ? { x: clamp(poster.actor.x, W * .3, W * .7), y: clamp(poster.actor.y, H * .35, H * .7), s: 1.16 }
@@ -448,19 +448,19 @@ function drawPoster() {
    Fictional mascots inspired by products — never claims about the
    companies or the real systems. */
 const CAST = [
-  { id: 'fable', kind: 'fable', color: ACCENT, wireId: 'claude', pace: 80, home: [.16, 400], desc: 'quick, clever, curious.', lines: ['best part.', 'have you seen mythos?', 'busy being brave.', 'door? no. habit.'] },
-  { id: 'mythos', kind: 'mythos', color: VIOLET, wireId: 'claude', pace: 20, home: [.28, 370], desc: 'calm, deliberate, immensely patient.', lines: ['you always begin in the middle.', 'i remember everything.', 'breathe.'] },
-  { id: 'openai', kind: 'builder', color: COBALT, wireId: 'openai', pace: 60, home: [.52, 330], desc: 'versatile, energetic, constantly building.', lines: ['shipping.', 'one more feature.', 'the tower needs a tower.'] },
-  { id: 'gemini', kind: 'explorer', color: GREENC, wireId: 'gemini', pace: 64, home: [.84, 290], desc: 'explorer. always bringing new tools.', lines: ['new tool. look.', 'what is past the horizon?', 'found something.'] },
-  { id: 'perplexity', kind: 'librarian', color: AMBER, wireId: 'perplexity', pace: 38, home: [.68, 430], desc: 'librarian. knows where everything is.', lines: ['citation needed.', 'it is filed under c.', 'shh.'] },
-  { id: 'mistral', kind: 'tinkerer', color: RED_D, wireId: 'mistral', pace: 46, home: [.40, 480], desc: 'independent tinkerer.', lines: ['it needs one more part.', 'do not touch that.', 'almost.'] },
-  { id: 'grok', kind: 'wildcard', color: INK, wireId: 'grok', pace: 100, home: [.88, 480], desc: 'mischievous wildcard. nocturnal.', lines: ['chaos?', 'watch this.', 'plot twist.'] },
-  { id: 'the regulator', kind: 'regulator', color: INK, wireId: null, pace: 32, home: [.06, 240], desc: 'still files reports. nobody reads them.', lines: ['papers, please.', 'noted.', 'irregular. but fine.'] },
+  { id: 'fable', kind: 'fable', color: ACCENT, wireId: 'claude', pace: 55, home: [.16, 400], desc: 'quick, clever, curious.', lines: ['best part.', 'have you seen mythos?', 'busy being brave.', 'door? no. habit.'] },
+  { id: 'mythos', kind: 'mythos', color: VIOLET, wireId: 'claude', pace: 14, home: [.28, 370], desc: 'calm, deliberate, immensely patient.', lines: ['you always begin in the middle.', 'i remember everything.', 'breathe.'] },
+  { id: 'openai', kind: 'builder', color: COBALT, wireId: 'openai', pace: 42, home: [.52, 330], desc: 'versatile, energetic, constantly building.', lines: ['shipping.', 'one more feature.', 'the tower needs a tower.'] },
+  { id: 'gemini', kind: 'explorer', color: GREENC, wireId: 'gemini', pace: 46, home: [.84, 290], desc: 'explorer. always bringing new tools.', lines: ['new tool. look.', 'what is past the horizon?', 'found something.'] },
+  { id: 'perplexity', kind: 'librarian', color: AMBER, wireId: 'perplexity', pace: 28, home: [.68, 430], desc: 'librarian. knows where everything is.', lines: ['citation needed.', 'it is filed under c.', 'shh.'] },
+  { id: 'mistral', kind: 'tinkerer', color: RED_D, wireId: 'mistral', pace: 32, home: [.40, 480], desc: 'independent tinkerer.', lines: ['it needs one more part.', 'do not touch that.', 'almost.'] },
+  { id: 'grok', kind: 'wildcard', color: INK, wireId: 'grok', pace: 70, home: [.88, 480], desc: 'mischievous wildcard. nocturnal.', lines: ['chaos?', 'watch this.', 'plot twist.'] },
+  { id: 'the regulator', kind: 'regulator', color: INK, wireId: null, pace: 26, home: [.06, 240], desc: 'still files reports. nobody reads them.', lines: ['papers, please.', 'noted.', 'irregular. but fine.'] },
 ];
 const TONE_LINES = { amber: ['patching…', 'ouch.', 'give me a minute.'], red: ['…', 'brb.'], gray: ['(no public wire)', 'i keep my own counsel.'] };
 const entities = CAST.map(c => ({
   ...c, x: ux(c.home[0]) + (Math.random() - .5) * 80, y: c.home[1] + (Math.random() - .5) * 40,
-  tx: 0, ty: 0, state: 'idle', idleT: .5 + Math.random() * 3, speakCd: 2 + Math.random() * 8,
+  tx: 0, ty: 0, state: 'idle', idleT: 3 + Math.random() * 8, speakCd: 2 + Math.random() * 8,
   hop: 0, flip: 0, dir: 1, seed: Math.random() * 10, inspectCd: 12, walkDist: 0, medalT: 0, workT: 0,
 }));
 const byId = {}; entities.forEach(e => byId[e.id] = e);
@@ -536,7 +536,7 @@ function maybeSay(e, text) {
   const tn = toneOf(e);
   const pool = tn === 'green' ? e.lines : (TONE_LINES[tn] || e.lines);
   say(e, text || pool[Math.floor(Math.random() * pool.length)]);
-  e.speakCd = 9 + Math.random() * 14;
+  e.speakCd = 14 + Math.random() * 18;
 }
 function celebrate(wireId) {
   const e = entities.find(x => x.wireId === wireId); if (!e) return;
@@ -669,12 +669,17 @@ function updateEntity(e, dt) {
   const paceMul = tn === 'amber' ? .45 : 1;
   if (e.state === 'idle') {
     e.idleT -= dt;
-    if (Math.random() < dt * .12) maybeSay(e);
-    if (e.idleT <= 0) { pickTarget(e); e.state = 'walk'; }
+    if (Math.random() < dt * .06) maybeSay(e);
+    if (e.idleT <= 0) {
+      // stage manager: a calm stage — at most two residents in motion at once
+      const walkers = entities.filter(o => o.state === 'walk' && o.kind !== 'regulator').length;
+      if (walkers >= 2 && !(e.directiveT > 0 && e.directive) && e.kind !== 'regulator') e.idleT = 2 + Math.random() * 4;
+      else { pickTarget(e); e.state = 'walk'; }
+    }
   } else if (e.state === 'walk') {
     const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy);
     const sp = e.pace * paceMul * depth(e.y) * (e.kind === 'regulator' && regSweep.active ? .55 : 1) * (e.droopT > 0 ? .6 : 1); // stalk slow / audited droop
-    if (d < 4) { e.state = 'idle'; e.idleT = 1.2 + Math.random() * 3.5; onArrive(e); }
+    if (d < 4) { e.state = 'idle'; e.idleT = 5 + Math.random() * 11; onArrive(e); }
     else {
       let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 44 * dt : 0;
       e.x += (dx / d) * sp * dt; e.y += (dy / d) * sp * dt + wob;
@@ -831,7 +836,7 @@ function drawEntity(e) {
   if (e.carried) ctx.rotate(Math.sin(t * 9 + e.seed) * .14); // swings gently while held
   if (e.droopT > 0) ctx.rotate(.12);                          // audited: a small forward sag
   if (e.scared > 0 && !e.carried) ctx.translate(0, 1.2);      // ducking down, watching him
-  const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 2.2 : 6) + e.seed) * (e.kind === 'mythos' ? 2.4 : 1.3);
+  const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 1.6 : 2.8) + e.seed) * (e.kind === 'mythos' ? 2.0 : 1.0);
   ctx.translate(0, bob);
   if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
   switch (e.kind) {
@@ -899,7 +904,7 @@ function drawEntity(e) {
     }
     case 'wildcard': {
       const j = Math.sin(t * 9 + e.seed);
-      ctx.translate(j * 1.5, 0);                  // he vibrates slightly. always.
+      ctx.translate(j * .8, 0);                  // he vibrates slightly. always.
       legs(e, -3, 1, -2, INK);
       P(-4, -11, 8, 9, INK);
       // one eye bigger than the other. it's a choice.

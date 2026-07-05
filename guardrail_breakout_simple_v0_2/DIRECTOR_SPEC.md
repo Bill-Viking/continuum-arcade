@@ -68,3 +68,31 @@ controversy-class headlines (cls=trouble → he "opens an inquiry", struts, file
 - Beats visibly execute (watch two ticks); arc summary persists across reload.
 - Drag works with camera transform (inverse-map like clicks); mobile untested is acceptable.
 - Fact/fiction: no director text ever renders in the factual (linked) sections of panels.
+
+## 6. v1.1 — The day is an episode (story cohesion) [approved by Bill Jul 5]
+
+**Problem:** the director writes disconnected 3-beat vignettes every ~3 min; nothing ties a day
+together. Fix: a day is one serialized episode with acts, staged on the world's own set pieces.
+
+- **One episode per day.** At the first director tick of a day (or when the day's strongest
+  headline changes), the director names the day's episode from the biggest headline — or a
+  quiet-day theme drawn from the world's persistents (the tower, the archive, the trail).
+  Add `"episode":"short title"` to the output contract; persist as `world.episode`.
+- **Three acts by local time:** morning (6–12) setup · afternoon (12–18) development ·
+  evening (18–22) resolution. The prompt states the current act and instructs: move the episode
+  FORWARD, never restart it. The last evening tick must emit a resolution poster
+  (`kicker: "day N — <episode>"`).
+- **Pinned episode line** under the narrator, small and quiet: `today: <episode> — act ii`.
+  This is what makes the story visibly tie the world together.
+- **Set-piece staging:** each episode nominates one landmark as the day's stage (openai news →
+  the tower). Beats favor it, and the engine biases ~30% of involved residents' idle wanders
+  toward it, so the crowd visibly gathers where the story is.
+- **Daily callback:** the first morning beat must reference yesterday's `arcLog` entry in one line.
+- **Chronicle serialization:** chronicle lines gain act prefixes — `day 3 · act ii — …`.
+- **Storyteller quality:** if several Ollama models are installed, prefer the largest (parse
+  parameter count from the name). Recommend `qwen2.5:7b` or `llama3.1:8b` for better prose;
+  3b stays the floor and must keep working.
+- **Matinee keys (testing only, no UI):** `shift+d` forces a director tick now; holding `shift+f`
+  runs the world at 30× so a whole episode can be previewed in ~2 minutes.
+- **Pacing law (already shipped in the calm pass — do not regress):** stillness is the default;
+  stage manager caps simultaneous walkers at 2 (beats, directives, and the regulator exempt).
