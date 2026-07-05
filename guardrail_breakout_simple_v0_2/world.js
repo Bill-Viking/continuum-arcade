@@ -231,13 +231,19 @@ function applyNews(id, item) {
 /* optional local storyteller: if Ollama is running on this machine, it writes
    the reactions. if not, personality templates do. zero setup either way. */
 let storyteller = 'templates', ollamaModel = null;
+function paramB(name) { const m = String(name).match(/(\d+(?:\.\d+)?)b\b/i); return m ? parseFloat(m[1]) : 0; } // parameter count in billions, from the tag
 async function tryOllama() {
   try {
     const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) });
     if (!r.ok) return;
     const j = await r.json();
-    ollamaModel = (j.models && j.models[0] || {}).name || null;
-    if (ollamaModel) { storyteller = 'ollama · ' + ollamaModel.split(':')[0]; renderFeed(); }
+    const names = (j.models || []).map(m => m && m.name).filter(Boolean);
+    if (!names.length) return;
+    // §6 storyteller quality: prefer the largest installed model for better prose
+    // (7b/8b over the 3b floor). picks up qwen2.5:7b automatically when it's added.
+    names.sort((a, b) => paramB(b) - paramB(a));
+    ollamaModel = names[0];
+    storyteller = 'ollama · ' + ollamaModel.split(':')[0]; renderFeed();
   } catch (e) { }
 }
 async function storytellerLine(e, item) {
@@ -576,6 +582,16 @@ function directiveTarget(e) {
 }
 function pickTarget(e) {
   if (e.directiveT > 0 && e.directive) { const d = directiveTarget(e); if (d) { e.tx = d[0]; e.ty = d[1]; return; } } // honor the user's directive
+  // §6 set-piece staging: the crowd gathers where the story is. ~30% of the time
+  // a resident the episode involves biases its idle wander toward the day's stage.
+  // this only redirects a walk the stage manager already permitted (pickTarget runs
+  // after the ≤2-walker cap), so it works within the pacing law, never around it.
+  const stageLm = world.episodeStage && LANDMARKS[world.episodeStage];
+  if (stageLm && Math.random() < .3 && (world.episodeCast || []).includes(e.id) && e.kind !== 'regulator' && e.kind !== 'mythos') {
+    e.tx = clamp(stageLm.x + (Math.random() - .5) * 70, M + 24, W - M - 24);
+    e.ty = clamp(stageLm.y + (Math.random() - .5) * 42, BAND_TOP, GROUND - 6);
+    return;
+  }
   const r = Math.random();
   const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 24, W - M - 24), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
   let p;
@@ -1271,7 +1287,18 @@ function applyDirective(e, d) {
   say(e, DIRECTIVE_SAY[d] || 'on it.', .05, e.color === INK ? MUT : e.color); sfx.tap();
   recordIntervention({ type: 'directive', who: e.id, what: d, ts: Date.now() }); // → the director's input
 }
-window.addEventListener('keydown', ev => { if (ev.key === 'm' || ev.key === 'M') muted = !muted; });
+// matinee test keys (no UI, no visual change): shift+d forces a director tick now;
+// hold shift+f to run the world at 30× and time-lapse the clock, so a whole episode
+// (three acts + the evening resolution) previews in ~2 minutes.
+let fastFwd = false, ffPrevOverride = null;
+window.addEventListener('keydown', ev => {
+  if (ev.key === 'm' || ev.key === 'M') muted = !muted;
+  if (ev.shiftKey && (ev.key === 'd' || ev.key === 'D')) { if (ollamaModel && !directorBusy) { directorCd = 175; runDirector(); } }
+  if (ev.shiftKey && (ev.key === 'f' || ev.key === 'F') && !fastFwd) { ffPrevOverride = hourOverride; fastFwd = true; }
+});
+window.addEventListener('keyup', ev => {
+  if ((ev.key === 'f' || ev.key === 'F' || ev.key === 'Shift') && fastFwd) { fastFwd = false; hourOverride = ffPrevOverride; }
+});
 // the feed is a door, not a label: click a chip, get the whole picture
 const feedEl = document.getElementById('feed');
 if (feedEl) feedEl.addEventListener('click', ev => { const chip = ev.target.closest('.chip'); if (chip && chip.dataset.id) showWireDetail(chip.dataset.id); });
@@ -1290,7 +1317,16 @@ if (aboutLink) aboutLink.addEventListener('click', ev => { ev.preventDefault(); 
 
 /* ---------------- loop ---------------- */
 let last = 0;
-function loop(ts) { const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
+function loop(ts) {
+  const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts;
+  if (fastFwd) {
+    for (let s = 0; s < 30; s++) update(dt);          // 30× world: director ticks, beats, movement
+    const base = hourOverride == null ? (new Date().getHours() + new Date().getMinutes() / 60) : hourOverride;
+    hourOverride = (base + dt * (24 / 150)) % 24;       // time-lapse the clock: a full day in ~150s
+  } else update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
 // the world was running before you opened the tab
 for (let i = 0; i < 3600; i++) update(1 / 60);
 poster = null; posterQ = []; posterCd = 1.2; // whatever happened during warm-up already happened
