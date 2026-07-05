@@ -381,6 +381,41 @@ function executeBeat(b) {
   }
   if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
 }
+/* apply one validated director tick: rotate the arc, name/advance the day's
+   episode, stage its cast, perform the beats, and close the evening on a
+   resolution poster. synchronous so it stands alone from the fetch. */
+function applyDirectorResult(ok) {
+  if (!ok) return;
+  if (world.arc && world.arc !== ok.arc) { world.arcLog = (world.arcLog || []); world.arcLog.push(world.arc); world.arcLog = world.arcLog.slice(-5); }
+  world.arc = ok.arc;
+  // §6 — name the day's episode on the first tick of a new day, or when the
+  // day's strongest headline changes; otherwise keep the title and move it
+  // forward. episode/stage are theater, persisted alongside the arc.
+  const strong = strongestHeadline();
+  const strongKey = strong ? strong.id + '::' + strong.title : '';
+  const newDay = world.episodeDay !== worldDay;
+  const headlineChanged = !newDay && !!strong && world.episodeHeadline !== strongKey && actInfo().i < 3;
+  if (newDay || !world.episode || headlineChanged) {
+    world.episode = ok.episode || quietTheme();
+    world.episodeStage = ok.stage || deriveStage(strong) || world.episodeStage || null;
+    world.episodeHeadline = strongKey;
+    world.episodeDay = worldDay;
+    if (newDay || !Array.isArray(world.episodeCast)) world.episodeCast = [];
+  } else if (ok.stage) {
+    world.episodeStage = ok.stage; // same day: let the director re-point the stage only
+  }
+  // the crowd gathers where the story is: today's cast drives the set-piece bias
+  world.episodeCast = Array.from(new Set([...(world.episodeCast || []), ...ok.beats.map(b => b.who)])).slice(-8);
+  saveWorld();
+  beatQueue = ok.beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / ok.beats.length) })); beatClock = 0;
+  interventions = []; // cleared after each successful director tick
+  // §6 — the evening resolution: the day must close on a poster (kicker
+  // "day N — <episode>"). guaranteed once, on the first evening tick that has an episode.
+  if (actInfo().i === 3 && world.resolvedDay !== worldDay && world.episode) {
+    world.resolvedDay = worldDay; saveWorld();
+    scheduleResolutionPoster();
+  }
+}
 async function runDirector() {
   if (directorBusy || !ollamaModel) return;
   directorBusy = true;
@@ -390,39 +425,7 @@ async function runDirector() {
       body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: { temperature: .85, num_predict: 800 }, system: DIRECTOR_SYS, prompt: JSON.stringify(buildDirectorState()) }),
     });
     const j = await r.json();
-    let obj = parseLoose(j.response);
-    const ok = coerceDirector(obj);
-    if (ok) {
-      if (world.arc && world.arc !== ok.arc) { world.arcLog = (world.arcLog || []); world.arcLog.push(world.arc); world.arcLog = world.arcLog.slice(-5); }
-      world.arc = ok.arc;
-      // §6 — name the day's episode on the first tick of a new day, or when the
-      // day's strongest headline changes; otherwise keep the title and move it
-      // forward. episode/stage are theater, persisted alongside the arc.
-      const strong = strongestHeadline();
-      const strongKey = strong ? strong.id + '::' + strong.title : '';
-      const newDay = world.episodeDay !== worldDay;
-      const headlineChanged = !newDay && !!strong && world.episodeHeadline !== strongKey && actInfo().i < 3;
-      if (newDay || !world.episode || headlineChanged) {
-        world.episode = ok.episode || quietTheme();
-        world.episodeStage = ok.stage || deriveStage(strong) || world.episodeStage || null;
-        world.episodeHeadline = strongKey;
-        world.episodeDay = worldDay;
-        if (newDay || !Array.isArray(world.episodeCast)) world.episodeCast = [];
-      } else if (ok.stage) {
-        world.episodeStage = ok.stage; // same day: let the director re-point the stage only
-      }
-      // the crowd gathers where the story is: today's cast drives the set-piece bias
-      world.episodeCast = Array.from(new Set([...(world.episodeCast || []), ...ok.beats.map(b => b.who)])).slice(-8);
-      saveWorld();
-      beatQueue = ok.beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / ok.beats.length) })); beatClock = 0;
-      interventions = []; // cleared after each successful director tick
-      // §6 — the evening resolution: the day must close on a poster (kicker
-      // "day N — <episode>"). guaranteed once, on the first evening tick that has an episode.
-      if (actInfo().i === 3 && world.resolvedDay !== worldDay && world.episode) {
-        world.resolvedDay = worldDay; saveWorld();
-        scheduleResolutionPoster();
-      }
-    }
+    applyDirectorResult(coerceDirector(parseLoose(j.response)));
   } catch (e) { /* offline or unreadable: discard silently, template life continues */ }
   directorBusy = false;
   directorCd = 175 + Math.random() * 30; // next tick in ~3 min
