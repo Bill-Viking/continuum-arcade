@@ -30,8 +30,9 @@ function hourNow() { const d = new Date(); return hourOverride ?? d.getHours() +
 
 /* ---------------- the world remembers (persistence) ---------------- */
 const SAVE_KEY = 'ct_world_v1';
-let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3, flags: [] };
+let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3, flags: [], seenNews: [] };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.first) world = s; } catch (e) { }
+world.seenNews = world.seenNews || [];
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -94,14 +95,15 @@ function renderFeed() {
   const f = document.getElementById('feed');
   if (f) f.innerHTML = WIRE.map(m => { const s = wire[m.id]; return `<span class="chip"><i class="dot ${s.tone}"></i><b>${m.id}</b>${s.word}</span>`; }).join('');
   const ls = document.getElementById('livestat');
-  if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#C9C9C9"') + '></span>' + (wireOk ? 'live' : 'not live');
+  if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#C9C9C9"') + '></span>' + (wireOk ? 'live' : 'not live') + ' · story: ' + storyteller;
   rotateWire(true);
 }
 let wireIdx = 0;
 function rotateWire(reset) {
   const el = document.getElementById('wireline'); if (!el) return;
-  // the wire carries both worlds: real incidents and the continuum chronicle
+  // the wire carries three worlds: status incidents, the news, the chronicle
   const items = WIRE.filter(m => wire[m.id].headline).map(m => `wire  ·  ${m.id} — ${wire[m.id].headline}`)
+    .concat(Object.entries(news).map(([id, n]) => `news  ·  ${id} — ${n.title.toLowerCase()}`))
     .concat(chronicleLines.map(c => 'continuum  ·  ' + c));
   const list = items.length ? items : ['wire  ·  all quiet.'];
   wireIdx = reset ? 0 : (wireIdx + 1) % list.length;
@@ -109,6 +111,77 @@ function rotateWire(reset) {
   setTimeout(() => { el.textContent = list[wireIdx % list.length]; el.style.opacity = 1; }, 350);
 }
 setInterval(() => rotateWire(false), 6000);
+
+/* ---------------- the news wire: real headlines become story ----------------
+   Hacker News (Algolia API, CORS-open, no key) — last 48 hours, per model.
+   A headline turns into: a poster, a resident carrying a little newspaper,
+   neighbors coming round to gossip, and a line in the chronicle. */
+const NEWS_QUERY = { openai: 'openai', claude: 'anthropic', gemini: '"google gemini"', grok: 'grok', mistral: '"mistral ai"', perplexity: '"perplexity ai"', cohere: 'cohere' };
+const news = {}; // id -> {title, points, cls}
+function classifyNews(title) {
+  if (/releas|launch|announc|unveil|introduc|ships|debuts|new model|version \d/i.test(title)) return 'release';
+  if (/rais|funding|valuation|billion|acqui|ipo/i.test(title)) return 'money';
+  if (/outage|down|lawsuit|sues?\b|breach|leak|fail|ban|fired|quits/i.test(title)) return 'trouble';
+  if (/benchmark|beats|tops|record|state.of.the.art|sota|caught up/i.test(title)) return 'flex';
+  return 'buzz';
+}
+const NEWS_WORD = { release: ['released.', GREENC], money: ['funded.', AMBER], trouble: ['headlines.', RED], flex: ['benchmarked.', COBALT], buzz: ['in the news.', INK] };
+const NEWS_REACT = { release: 'we shipped.', money: 'we are rich?', trouble: 'no comment.', flex: 'obviously.', buzz: 'they are talking about us.' };
+async function fetchNews() {
+  const since = Math.floor(Date.now() / 1000) - 48 * 3600;
+  await Promise.allSettled(Object.entries(NEWS_QUERY).map(async ([id, q]) => {
+    try {
+      const r = await fetch(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&tags=story&numericFilters=created_at_i%3E${since}&hitsPerPage=6`, { cache: 'no-store' });
+      const j = await r.json();
+      const hits = (j.hits || []).filter(h => h.points >= 3 && h.title);
+      if (!hits.length) return;
+      hits.sort((a, b) => b.points - a.points);
+      const top = hits[0];
+      news[id] = { title: top.title, points: top.points, cls: classifyNews(top.title) };
+      applyNews(id, news[id]);
+    } catch (e) { }
+  }));
+  rotateWire(true);
+}
+function applyNews(id, item) {
+  const key = id + '::' + item.title;
+  if (world.seenNews.includes(key)) return;
+  world.seenNews.push(key); world.seenNews = world.seenNews.slice(-50); saveWorld();
+  const [word, dotColor] = NEWS_WORD[item.cls];
+  const e = entities.find(x => x.wireId === id) || null;
+  announce('the wire — ' + id, word, dotColor, item.title.toLowerCase().slice(0, 66) + (item.title.length > 66 ? '…' : '') + '  ·  hn ' + item.points + 'pts', e);
+  if (e) {
+    e.newsT = 300; e.hop = 1;                       // carries the paper around for a while
+    storytellerLine(e, item);                       // his reaction, templated or written by a local llm
+    entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2)
+      .forEach((o, i) => { o.tx = e.x + (i ? 38 : -38); o.ty = e.y + 6; o.state = 'walk'; }); // gossip cluster
+  }
+}
+/* optional local storyteller: if Ollama is running on this machine, it writes
+   the reactions. if not, personality templates do. zero setup either way. */
+let storyteller = 'templates', ollamaModel = null;
+async function tryOllama() {
+  try {
+    const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) });
+    if (!r.ok) return;
+    const j = await r.json();
+    ollamaModel = (j.models && j.models[0] || {}).name || null;
+    if (ollamaModel) { storyteller = 'ollama · ' + ollamaModel.split(':')[0]; renderFeed(); }
+  } catch (e) { }
+}
+async function storytellerLine(e, item) {
+  say(e, NEWS_REACT[item.cls], 1.5);
+  if (!ollamaModel) return;
+  try {
+    const r = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ model: ollamaModel, stream: false, options: { num_predict: 20 }, prompt: `You are ${e.id}, a tiny robot (${e.desc}) in a quiet minimalist world. React to this news about you in six lowercase words or fewer, deadpan, no emoji: "${item.title}"` }),
+    });
+    const j = await r.json();
+    const line = (j.response || '').trim().split('\n')[0].replace(/["']/g, '').toLowerCase().slice(0, 56);
+    if (line) say(e, line, 0, e.color === INK ? MUT : e.color);
+  } catch (e2) { }
+}
 
 /* ---------------- little systems ---------------- */
 let particles = [], speeches = [], sparks = [], clouds = [], moths = [];
@@ -291,7 +364,7 @@ function updateComfort(dt) {
 
 function updateEntity(e, dt) {
   const tn = toneOf(e);
-  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt);
+  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt);
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
     if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
@@ -389,6 +462,38 @@ function update(dt) {
     prevNight = n;
     announce('continuum — ' + (n ? '22:00' : '06:00'), n ? 'lights out.' : 'good morning.', n ? COBALT : AMBER, n ? 'the residents head home. grok clocks in.' : 'the residents stretch. grok clocks out.', null);
   }
+}
+
+/* ---------------- the narrator: one line that makes it legible ---------------- */
+function stateWord(e) {
+  if (e.state === 'down') return 'down';
+  if (e.state === 'sleep') return 'asleep';
+  if (e.state === 'work') return 'building';
+  if (e.state === 'walk') {
+    const t = { x: e.tx, y: e.ty };
+    const near = (p, r) => Math.hypot(t.x - p.x, t.y - p.y) < r;
+    if (near(TOWER, 70)) return 'heading to the tower';
+    if (near(ARCHIVE, 70)) return 'heading to the archive';
+    if (near(BENCH, 70)) return 'heading to the bench';
+    if (near(VAULT, 70)) return 'heading to the vault';
+    const m = byId['mythos'];
+    if (e.id === 'fable' && Math.hypot(t.x - m.x, t.y - m.y) < 70) return 'going to see mythos';
+    return e.kind === 'explorer' ? 'out charting' : e.kind === 'wildcard' ? 'up to something' : 'out for a walk';
+  }
+  return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying', tinkerer: 'mid-repair', wildcard: 'plotting', regulator: 'on patrol' }[e.kind] || 'idle';
+}
+function narratorText() {
+  const downE = entities.find(e => e.state === 'down');
+  if (downE) return downE.id + ' is down. mythos is keeping company.';
+  const items = [];
+  const amber = WIRE.find(m => wire[m.id].tone === 'amber');
+  if (amber) items.push(amber.id + ' is patching — ' + (wire[amber.id].headline || 'a bit wobbly').slice(0, 58) + '.');
+  const ids = Object.keys(news);
+  if (ids.length) { const id = ids[Math.floor(Date.now() / 9000) % ids.length]; items.push(id + ' made the news: ' + news[id].title.toLowerCase().slice(0, 58) + '.'); }
+  const walker = entities.find(e => e.state === 'walk' && e.kind !== 'regulator');
+  if (walker) items.push(walker.id + ' is ' + stateWord(walker) + '.');
+  if (!items.length) return 'a quiet day in continuum.';
+  return items[Math.floor(Date.now() / 9000) % items.length];
 }
 
 /* ---------------- drawing: fat pixels ---------------- */
@@ -517,6 +622,17 @@ function drawEntity(e) {
       break;
     }
   }
+  // made the news? he's carrying today's paper around to show everyone
+  if (e.newsT > 0 && e.state !== 'down' && e.kind !== 'regulator') {
+    const nx = e.dir > 0 ? 7 : -11;
+    P(nx, -14, 4, 5, PAPER);
+    ctx.strokeStyle = FAINT; ctx.lineWidth = 1;
+    ctx.strokeRect(nx * PXU, -14 * PXU, 4 * PXU, 5 * PXU);
+    ctx.beginPath();
+    ctx.moveTo((nx + .6) * PXU, -12.6 * PXU); ctx.lineTo((nx + 3.4) * PXU, -12.6 * PXU);
+    ctx.moveTo((nx + .6) * PXU, -11.2 * PXU); ctx.lineTo((nx + 3.4) * PXU, -11.2 * PXU);
+    ctx.stroke();
+  }
   ctx.restore();
   if (selected === e.id) {
     ctx.font = '600 10px ' + FONT; ctx.fillStyle = e.color === INK ? MUT : e.color; ctx.textAlign = 'center';
@@ -538,6 +654,10 @@ function drawScene() {
   ctx.fillText('local ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), W - M, 162);
   ctx.textAlign = 'left';
   ctx.fillText('day ' + worldDay + '  ·  ' + (isNight() ? 'the residents are sleeping.' : 'the residents are home.'), M, 162);
+  // the narrator — the world explains itself, one quiet sentence at a time
+  ctx.font = '12px ' + FONT; ctx.fillStyle = MUT; ctx.textAlign = 'center';
+  ctx.fillText(narratorText(), W / 2, 184); ctx.textAlign = 'left';
+  ctx.font = '600 9px ' + FONT;
   // sky: clouds, sun/moon on the arc
   ctx.strokeStyle = HAIR; ctx.lineWidth = 1;
   for (const c of clouds) { ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.w, c.y); ctx.moveTo(c.x + 10, c.y + 5); ctx.lineTo(c.x + c.w - 14, c.y + 5); ctx.stroke(); }
@@ -644,6 +764,16 @@ function draw() {
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
   ctx.globalAlpha = 1;
   drawSpeeches();
+  // hover: any resident explains themselves
+  const hov = entities.find(e2 => Math.hypot(mouse.x - e2.x, mouse.y - (e2.y - 16)) < 34);
+  if (hov && selected !== hov.id) {
+    ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
+    const cap = hov.id + ' · ' + stateWord(hov) + (hov.wireId ? ' · ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
+    const w2 = ctx.measureText(cap).width;
+    ctx.fillStyle = PAPER; ctx.fillRect(hov.x - w2 / 2 - 5, hov.y + 8, w2 + 10, 17);
+    ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(hov.x - w2 / 2 - 5, hov.y + 8, w2 + 10, 17);
+    ctx.fillStyle = MUT; ctx.fillText(cap, hov.x, hov.y + 20); ctx.textAlign = 'left';
+  }
   ctx.restore();
   drawCard();
   drawPoster();
@@ -697,4 +827,5 @@ poster = null; posterQ = []; posterCd = 1.2; // whatever happened during warm-up
 announce('continuum — day ' + worldDay, world.visits > 1 ? 'welcome back.' : 'just in time.', ACCENT,
   world.visits > 1 ? (awayH >= 4 ? 'the world kept running. the tower is taller.' : 'the world kept running.') : 'it was already running before you arrived.', null, { prio: 2 });
 renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000);
+tryOllama(); fetchNews(); setInterval(fetchNews, 10 * 60 * 1000);
 requestAnimationFrame(loop);
