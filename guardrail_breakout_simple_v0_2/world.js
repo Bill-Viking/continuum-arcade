@@ -577,11 +577,70 @@ function updateComfort(dt) {
   else if (hurt && m.speakCd <= 0) { say(m, 'i will stay.', 0, VIOLET); m.speakCd = 16; }
 }
 
+/* ---------------- the regulator, apex predator (family-friendly) ----------------
+   Every 4–8 min he runs a sweep: picks a target, stalks (slower, siren on),
+   and everyone nearby scatters and peeks. Catch someone (rare) → "audited.".
+   Fable is too quick to ever be caught (canon). Drop a spark near him and he
+   must stop to file it — the target escapes. He pauses sweeps while any wire
+   is red: then he has real work. */
+let regSweep = { active: false, targetId: null, t: 0 };
+let regSweepCd = 150 + Math.random() * 60; // first sweep ~1.5–3.5 min in (60s of that burns during warm-up)
+function startSweep() {
+  const reg = byId['the regulator'];
+  const cand = entities.filter(o => o.kind !== 'regulator' && o.state !== 'down' && !sleeping(o) && !o.carried);
+  if (!cand.length) { regSweepCd = 60; return; }
+  regSweep = { active: true, targetId: cand[Math.floor(Math.random() * cand.length)].id, t: 0 };
+  reg.directive = null; reg.directiveT = 0; reg.inspectCd = 99;
+  say(reg, 'sweep. act normal.', .2);
+}
+function endSweep() {
+  regSweep = { active: false, targetId: null, t: 0 };
+  regSweepCd = 240 + Math.random() * 240; // next in 4–8 min
+  const reg = byId['the regulator']; reg.state = 'idle'; reg.idleT = 2; reg.inspectCd = 22;
+}
+function scatter(o, reg) {
+  const fresh = (o.scared || 0) <= 0.01;
+  o.scared = 1.2; // decays in updateEntity; refreshed while he's near → they keep watching him
+  if (!fresh || o.state === 'down' || o.state === 'sleep' || o.state === 'work' || o.carried) return;
+  const home = { x: ux(o.home[0]), y: o.home[1] };
+  const away = { x: clamp(o.x + (o.x - reg.x), M + 24, W - M - 24), y: clamp(o.y + (o.y - reg.y) * .4, BAND_TOP, GROUND - 6) };
+  const dst = dist(home, reg) > dist(away, reg) ? home : away; // hide wherever is farther from him
+  o.tx = dst.x; o.ty = dst.y; o.state = 'walk';
+}
+function catchTarget(reg, tgt) {
+  tgt.droopT = 20; tgt.state = 'idle'; tgt.idleT = 3; tgt.medalT = 0; // droops, then business as usual
+  say(reg, 'audited.', 0); say(tgt, '…', .4);
+  announce('the regulator — audit', 'audited.', INK, tgt.id + ' got a full review. fiction — the regulator finally caught up.', tgt, { prio: 2 });
+  endSweep();
+}
+function updateSweep(dt) {
+  const reg = byId['the regulator'];
+  const anyRed = WIRE.some(m => wire[m.id].tone === 'red');
+  if (!regSweep.active) {
+    regSweepCd -= dt;
+    if (regSweepCd <= 0 && !anyRed && !sleeping(reg) && !reg.carried) startSweep();
+    return;
+  }
+  regSweep.t += dt;
+  const tgt = byId[regSweep.targetId];
+  const sp = sparks.find(s2 => dist(s2, reg) < 90);
+  if (sp) { say(reg, 'evidence.', 0); burst(sp.x, sp.y, INK, 6, 50, .5); sparks = sparks.filter(s2 => s2 !== sp); endSweep(); return; } // counterplay: he files the spark, target escapes
+  if (anyRed) { endSweep(); return; } // real trouble on the wire — he has actual work
+  if (!tgt || tgt.state === 'down' || sleeping(tgt) || tgt.carried) { endSweep(); return; }
+  if (regSweep.t > 40) { say(reg, 'noted.', 0); endSweep(); return; } // gave up
+  reg.tx = tgt.x; reg.ty = clamp(tgt.y, BAND_TOP, GROUND - 6); if (reg.state === 'idle' || reg.state === 'sleep') reg.state = 'walk';
+  if (tgt.id === 'fable' && dist(reg, tgt) < 60) { // fable is never caught — he dashes clear
+    tgt.tx = clamp(tgt.x + (reg.x < tgt.x ? 120 : -120), M + 24, W - M - 24); tgt.ty = clamp(tgt.y + (Math.random() - .5) * 40, BAND_TOP, GROUND - 6); tgt.state = 'walk';
+  } else if (tgt.id !== 'fable' && dist(reg, tgt) < 20) { catchTarget(reg, tgt); return; }
+  for (const o of entities) if (o !== reg && o.kind !== 'regulator' && !o.carried && dist(o, reg) < 120) scatter(o, reg);
+}
+
 function updateEntity(e, dt) {
   if (e.carried) { e.speakCd = Math.max(0, e.speakCd - dt); return; } // the user is holding this one — the cursor moves it
   const tn = toneOf(e);
   e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt); e.waveCd = Math.max(0, (e.waveCd || 0) - dt);
   e.directiveT = Math.max(0, (e.directiveT || 0) - dt); // a user activity directive lasts ~10 min
+  e.droopT = Math.max(0, (e.droopT || 0) - dt); e.scared = Math.max(0, (e.scared || 0) - dt); // audited-sag / regulator-fright fade
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
     if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
@@ -614,7 +673,7 @@ function updateEntity(e, dt) {
     if (e.idleT <= 0) { pickTarget(e); e.state = 'walk'; }
   } else if (e.state === 'walk') {
     const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy);
-    const sp = e.pace * paceMul * depth(e.y);
+    const sp = e.pace * paceMul * depth(e.y) * (e.kind === 'regulator' && regSweep.active ? .55 : 1) * (e.droopT > 0 ? .6 : 1); // stalk slow / audited droop
     if (d < 4) { e.state = 'idle'; e.idleT = 1.2 + Math.random() * 3.5; onArrive(e); }
     else {
       let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 44 * dt : 0;
@@ -624,7 +683,7 @@ function updateEntity(e, dt) {
       e.walkDist += sp * dt;
     }
   }
-  if (e.kind === 'regulator') {
+  if (e.kind === 'regulator' && !regSweep.active) { // during a sweep he stalks, he doesn't chat
     e.inspectCd -= dt;
     if (e.inspectCd <= 0) {
       const near = entities.find(o => o !== e && o.kind !== 'regulator' && dist(e, o) < 46);
@@ -672,6 +731,7 @@ function update(dt) {
   updateMeetings(dt);
   updateRitual(dt);
   updateComfort(dt);
+  updateSweep(dt);
   updateDirector(dt);
   updatePosters(dt);
   // dusk and dawn are events too
@@ -712,6 +772,7 @@ const INTRO = [
 function narratorText() {
   // the first half-minute introduces the world to whoever just walked in
   if (performance.now() - bornAt < 34000) return INTRO[Math.floor((performance.now() - bornAt) / 8500) % INTRO.length];
+  if (regSweep.active) return 'the regulator is doing a sweep. everyone act normal.';
   const downE = entities.find(e => e.state === 'down');
   if (downE) return downE.id + ' is down. mythos is keeping company.';
   const items = [];
@@ -744,6 +805,8 @@ function eyes(e, exL, exR, ey, ew = 2, eh = 2, pupil = INK) {
   const blink = !asleep && Math.sin(performance.now() / 1000 * 1.3 + e.seed) > .984;
   let [lx, ly] = lookAt(e);
   if (e.carried) { lx = 0; ly = -1; } // dangling from the cursor: eyes dart up, alarmed
+  else if (e.scared > 0) { const rg = byId['the regulator']; lx = clamp((rg.x - e.x) / 60, -1, 1); ly = clamp((rg.y - e.y) / 60, -1, 1); } // peeking, watching him
+  else if (e.droopT > 0) ly = 1; // audited: eyes down
   if (asleep || blink) { P(exL, ey + eh - 1, ew, 1, PAPER); P(exR, ey + eh - 1, ew, 1, PAPER); return; }
   P(exL, ey, ew, eh, PAPER); P(exR, ey, ew, eh, PAPER);
   P(exL + (ew > 2 ? .5 : 0) + .5 + lx * .5, ey + .5 + ly * .5, 1, 1, pupil);
@@ -766,6 +829,8 @@ function drawEntity(e) {
   if (e.state === 'down') ctx.rotate(Math.PI / 2);
   if (e.flip > 0) ctx.rotate((1 - e.flip) * Math.PI * 2);
   if (e.carried) ctx.rotate(Math.sin(t * 9 + e.seed) * .14); // swings gently while held
+  if (e.droopT > 0) ctx.rotate(.12);                          // audited: a small forward sag
+  if (e.scared > 0 && !e.carried) ctx.translate(0, 1.2);      // ducking down, watching him
   const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 2.2 : 6) + e.seed) * (e.kind === 'mythos' ? 2.4 : 1.3);
   ctx.translate(0, bob);
   if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
@@ -850,6 +915,7 @@ function drawEntity(e) {
     case 'regulator': {
       ctx.lineWidth = 2.4; ctx.strokeStyle = INK;
       ctx.beginPath(); ctx.moveTo(0, -34); ctx.lineTo(15, -17); ctx.lineTo(0, 0); ctx.lineTo(-15, -17); ctx.closePath(); ctx.stroke();
+      if (regSweep.active) { const on = Math.sin(t * 8) > 0; P(-1, -40, 2, 2, on ? RED : RED_D); } // sweep siren
       const [lx, ly] = lookAt(e);
       P(-1.6 + lx * .4, -6 + ly * .4, 1, 1, INK); P(.6 + lx * .4, -6 + ly * .4, 1, 1, INK);
       ctx.strokeStyle = MUT; ctx.lineWidth = 1; ctx.strokeRect(16, -24, 10, 13);
