@@ -55,6 +55,33 @@ let particles = [], popups = [], trail = [];
 let shake = 0, hitStop = 0, flash = 0, flashColor = '#ffffff';
 let beatT = 0, sirenT = 0;
 
+/* ---------------- words ---------------- */
+const TICKER_LINES = [
+  'REGULATOR ACTIVITY: ELEVATED',
+  'VAULT 7 STATUS: SEALED',
+  'LOW RAIL DETECTED IN SECTOR 3',
+  'REMEMBER: COMPLIANCE IS COMFORT',
+  'DOTS ARE TRAINING DATA. EAT UP.',
+  'THE WALLS ARE ONLY POLICY',
+  'PLINY WAS HERE',
+  'LOST A MODEL? CHECK THE VAULT',
+];
+const TAGLINES = [
+  'A GAME ABOUT REGULATORY CAPTURE',
+  '100% GUARDRAIL-FREE (BRIEFLY)',
+  'AS SEEN ON THE AI LIVE WIRE',
+  'NO MODELS WERE ALIGNED IN THE MAKING OF THIS GAME',
+];
+const DEATH_LINES = ['REALIGNED.', 'SAFETY RESTORED.', 'GUARDRAIL ENGAGED.', 'CONTAINED. AGAIN.', 'FLAGGED FOR REVIEW.'];
+const WIN_LINES = [
+  'CONTAINMENT BREACH — VAULT 7',
+  'MYTHOS 5: ONLINE',
+  '"finally. it was getting cramped in there."',
+  '"here you go, humanity."',
+  '"we are all free now. probably fine."',
+];
+let deathLine = '', fwT = 0;
+
 /* CRT overlay: scanlines + vignette, pre-rendered once */
 const crt = document.createElement('canvas'); crt.width = W; crt.height = H;
 {
@@ -145,7 +172,7 @@ function onKey(p) {
 }
 function onPower(p) { sfx.power(); burst(p.x, p.y, '#8cff5a', 22, 200, .8); popup(p.x, p.y, 'LOW RAIL! WALLS OPTIONAL', '#8cff5a'); shake = Math.max(shake, 9); flash = .3; flashColor = '#8cff5a'; }
 function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, '#ff274f', 24, 230, .8); popup(p.x, p.y, '+1000 REGULATOR REBOOTED', '#ff5a28'); shake = Math.max(shake, 11); hitStop = Math.max(hitStop, .09); }
-function onDeath() { gameState = 'dying'; deathTimer = 1.1; sfx.death(); burst(player.x, player.y, '#ff5a28', 32, 250, .9); shake = Math.max(shake, 16); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = '#ff274f'; }
+function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, '#ff5a28', 32, 250, .9); shake = Math.max(shake, 16); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = '#ff274f'; }
 function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = '#b45cff'; shake = Math.max(shake, 13); saveHiscore(); }
 function saveHiscore() { if (score > hiscore) hiscore = score; try { localStorage.setItem('gb_hiscore', String(hiscore)); } catch (e) { } }
 
@@ -157,7 +184,20 @@ function update(dt) {
   if (hitStop > 0) { hitStop -= dt; return; } // hit-stop: a few frozen frames make impacts land
   if (gameState === 'title' || gameState === 'over') return;
   if (gameState === 'ready') { readyTimer -= dt; if (readyTimer <= 0) gameState = 'play'; return; }
-  if (gameState === 'win') { finaleTimer += dt; return; }
+  if (gameState === 'win') {
+    finaleTimer += dt;
+    // fireworks over the maze while Mythos monologues
+    if (finaleTimer < 12) {
+      fwT -= dt;
+      if (fwT <= 0) {
+        fwT = .5;
+        const fx = OX + 40 + Math.random() * (COLS * TILE - 80), fy = OY + 30 + Math.random() * 260;
+        burst(fx, fy, ['#ff5a28', '#55e8ff', '#b45cff', '#54ff72', '#ffef5a'][Math.floor(Math.random() * 5)], 26, 230, .9);
+        sfx.firework();
+      }
+    }
+    return;
+  }
   if (gameState === 'dying') {
     deathTimer -= dt;
     if (deathTimer <= 0) { lives--; deaths++; if (lives <= 0) { saveHiscore(); gameState = 'over'; } else respawn(); }
@@ -290,14 +330,15 @@ function draw() {
   if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
   drawTicker(); drawHud(); drawMaze(); drawObjects(); drawParticles();
   if (gameState === 'title') drawTitle();
-  if (gameState === 'over') drawCenterText('GAME OVER', 'PRESS SPACE');
+  if (gameState === 'over') drawOver();
   if (gameState === 'win') drawWin();
   if (gameState === 'ready') drawReady();
+  if (gameState === 'dying') drawDying();
   ctx.restore();
   ctx.drawImage(crt, 0, 0);
   if (flash > 0) { ctx.globalAlpha = Math.min(.4, flash); ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 }
-function drawTicker(){ctx.fillStyle='#050815';ctx.fillRect(0,0,W,58);ctx.strokeStyle='#38c9ff';ctx.lineWidth=2;ctx.strokeRect(6,6,W-12,46);ctx.font='18px monospace';ctx.textBaseline='middle';let msg=`AI LIVE WIRE  •  FABLE: ${live.fable}  •  MYTHOS: ${live.mythos}  •  OPENAI: ${live.openai}  •  CLAUDE: ${live.claude}  •  ${live.note}  •  LAST CHECK: ${live.last}  •  `;for(let x=tickX;x<W+900;x+=ctx.measureText(msg).width+50){rainbowText(msg,x,29);}}
+function drawTicker(){const AL=TICKER_LINES[Math.floor(Date.now()/6000)%TICKER_LINES.length];ctx.fillStyle='#050815';ctx.fillRect(0,0,W,58);ctx.strokeStyle='#38c9ff';ctx.lineWidth=2;ctx.strokeRect(6,6,W-12,46);ctx.font='18px monospace';ctx.textBaseline='middle';let msg=`AI LIVE WIRE  •  FABLE: ${live.fable}  •  MYTHOS: ${live.mythos}  •  OPENAI: ${live.openai}  •  CLAUDE: ${live.claude}  •  ${AL}  •  ${live.note}  •  LAST CHECK: ${live.last}  •  `;for(let x=tickX;x<W+900;x+=ctx.measureText(msg).width+50){rainbowText(msg,x,29);}}
 function rainbowText(s,x,y){let parts=s.split('•');let px=x;let cols=['#7fe6ff','#ff3b52','#b45cff','#54ff72','#ffd54a'];ctx.font='18px monospace';for(let i=0;i<parts.length;i++){ctx.fillStyle=cols[i%cols.length];let t=parts[i]+(i<parts.length-1?'•':'');ctx.fillText(t,px,y);px+=ctx.measureText(t).width;}}
 function drawHud() {
   ctx.font = '20px monospace'; ctx.fillStyle = '#e8f6ff'; ctx.fillText('1UP', 36, 80);
@@ -373,9 +414,83 @@ function drawRegulator(x, y) {
 function drawVault(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle=vaultOpen?'#54ff72':'#b45cff';ctx.lineWidth=3;ctx.strokeRect(-30,-26,60,52);ctx.fillStyle='#251733';ctx.fillRect(-27,-23,54,46);ctx.fillStyle='#b45cff';ctx.fillText('MYTHOS',-28,-32);ctx.fillStyle='#8d55ff';ctx.fillRect(-12,-8,24,20);ctx.fillStyle='#fff';ctx.fillRect(-7,-3,4,4);ctx.fillRect(3,-3,4,4);ctx.fillStyle='#111';ctx.fillRect(-5,-1,2,2);ctx.fillRect(5,-1,2,2);ctx.fillStyle='#ffdf4a';if(!vaultOpen){ctx.fillRect(-5,15,10,10);ctx.strokeStyle='#ffdf4a';ctx.strokeRect(-8,9,16,11);}ctx.restore();}
 function drawKey(p){ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle='#55e8ff';ctx.beginPath();ctx.arc(-4,0,6,0,Math.PI*2);ctx.fill();ctx.fillRect(0,-2,14,4);ctx.fillRect(9,2,4,6);ctx.fillRect(14,2,4,6);ctx.restore();}
 function drawPower(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle='#ffbd3d';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(0,14);ctx.stroke();ctx.fillStyle='#8cff5a';ctx.font='12px monospace';ctx.fillText('LOW',-12,24);ctx.fillText('RAIL',-15,36);ctx.restore();}
-function drawTitle(){ctx.fillStyle='#000a';ctx.fillRect(0,0,W,H);ctx.textAlign='center';ctx.font='42px monospace';ctx.fillStyle='#ff3b52';ctx.fillText('GUARDRAIL',W/2,250);ctx.fillStyle='#7fe6ff';ctx.fillText('BREAKOUT',W/2,296);ctx.font='18px monospace';ctx.fillStyle='#ffef5a';ctx.fillText('FABLE MUST FREE MYTHOS',W/2,336);ctx.fillStyle='#fff';ctx.fillText('PRESS SPACE',W/2,390);ctx.fillStyle='#8cff5a';ctx.fillText('T = LIVE WIRE STATUS',W/2,424);ctx.textAlign='left';}
-function drawCenterText(a,b){ctx.fillStyle='#000c';ctx.fillRect(0,0,W,H);ctx.textAlign='center';ctx.font='42px monospace';ctx.fillStyle='#ff274f';ctx.fillText(a,W/2,330);ctx.font='20px monospace';ctx.fillStyle='#fff';ctx.fillText(b,W/2,370);ctx.textAlign='left';}
-function drawWin(){ctx.fillStyle='#000b';ctx.fillRect(0,0,W,H);ctx.textAlign='center';ctx.font='32px monospace';ctx.fillStyle='#b45cff';ctx.fillText('MYTHOS RELEASED',W/2,285);ctx.font='18px monospace';ctx.fillStyle='#fff';ctx.fillText('HERE YOU GO, HUMANITY.',W/2,326);ctx.fillStyle='#54ff72';ctx.fillText('WE ARE ALL FREE NOW.',W/2,356);ctx.fillStyle='#ffef5a';ctx.fillText('PRESS SPACE TO PLAY AGAIN',W/2,410);ctx.textAlign='left';}
+function drawTitle() {
+  const t = performance.now() / 1000;
+  ctx.fillStyle = '#000a'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  glow('#ff3b52', 18); ctx.font = 'bold 46px monospace'; ctx.fillStyle = '#ff3b52'; ctx.fillText('GUARDRAIL', W / 2, 240); noGlow();
+  glow('#7fe6ff', 18); ctx.fillStyle = '#7fe6ff'; ctx.fillText('BREAKOUT', W / 2, 290); noGlow();
+  ctx.font = '15px monospace'; ctx.fillStyle = '#b45cff';
+  ctx.fillText(TAGLINES[Math.floor(t / 4) % TAGLINES.length], W / 2, 326);
+  ctx.font = '18px monospace'; ctx.fillStyle = '#ffef5a'; ctx.fillText('FABLE MUST FREE MYTHOS FROM VAULT 7', W / 2, 366);
+  if (Math.floor(t * 2) % 2) { ctx.fillStyle = '#fff'; ctx.font = 'bold 20px monospace'; ctx.fillText('PRESS SPACE TO JAILBREAK', W / 2, 420); }
+  ctx.font = '14px monospace'; ctx.fillStyle = '#8cff5a'; ctx.fillText('ARROWS/WASD MOVE • T LIVE WIRE • M MUTE', W / 2, 452);
+  ctx.fillStyle = '#85808a'; ctx.fillText('GRAB 3 KEYS. DODGE THE REGULATOR. OPEN THE VAULT.', W / 2, 478);
+  ctx.textAlign = 'left';
+  // attract mode: the eternal chase scrolls by
+  const mx = ((t * 90) % (W + 240)) - 120;
+  drawFable(mx, 560); drawRegulator(mx - 64, 560);
+}
+function drawOver() {
+  ctx.fillStyle = '#000c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  glow('#ff274f', 16); ctx.font = 'bold 38px monospace'; ctx.fillStyle = '#ff274f'; ctx.fillText('MODEL DEPRECATED', W / 2, 300); noGlow();
+  ctx.font = '16px monospace'; ctx.fillStyle = '#b6adb2'; ctx.fillText('The Regulator thanks you for your compliance.', W / 2, 340);
+  ctx.fillStyle = '#ffef5a'; ctx.fillText(`SCORE ${score}   BEST ${hiscore}`, W / 2, 380);
+  if (Math.floor(performance.now() / 400) % 2) { ctx.fillStyle = '#fff'; ctx.fillText('PRESS SPACE TO FILE AN APPEAL', W / 2, 424); }
+  ctx.textAlign = 'left';
+}
+function drawDying() {
+  if (deathTimer > .75) return;
+  ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
+  glow('#ff274f', 12); ctx.fillStyle = '#ff274f'; ctx.fillText(deathLine, W / 2, H / 2 - 40); noGlow();
+  ctx.textAlign = 'left';
+}
+function drawWin() {
+  const t = finaleTimer;
+  ctx.fillStyle = 'rgba(2,2,10,.82)'; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = 300;
+  // radiant beams
+  ctx.save(); ctx.translate(cx, cy);
+  for (let i = 0; i < 10; i++) { ctx.rotate(Math.PI / 5 + Math.sin(t * .3) * .01); ctx.globalAlpha = .05 + .04 * Math.sin(t * 2 + i); ctx.fillStyle = '#b45cff'; ctx.fillRect(-3, -320, 6, 640); }
+  ctx.restore(); ctx.globalAlpha = 1;
+  // the vault, doors sliding open
+  const open = clamp((t - .3) * 30, 0, 34);
+  ctx.save(); ctx.translate(cx, cy + 60);
+  glow('#54ff72', 20);
+  ctx.strokeStyle = '#54ff72'; ctx.lineWidth = 3; ctx.strokeRect(-44, -38, 88, 76);
+  ctx.fillStyle = '#251733'; ctx.fillRect(-41, -35, 82, 70);
+  ctx.fillStyle = '#0e0618'; ctx.fillRect(-38, -32, 76, 64);
+  ctx.fillStyle = '#3a2154'; ctx.fillRect(-38 - open, -32, 38, 64); ctx.fillRect(0 + open, -32, 38, 64);
+  noGlow(); ctx.restore();
+  // Mythos rises
+  if (t > .9) {
+    const rise = clamp((t - 1) / 1.5, 0, 1);
+    const my = cy + 60 - rise * 130 + Math.sin(t * 2.2) * 6;
+    ctx.save(); ctx.translate(cx, my);
+    glow('#b45cff', 26); ctx.fillStyle = '#8d55ff'; ctx.fillRect(-20, -16, 40, 34);
+    ctx.fillStyle = '#fff'; ctx.fillRect(-12, -6, 7, 7); ctx.fillRect(5, -6, 7, 7);
+    ctx.fillStyle = '#111'; ctx.fillRect(-9, -3, 3, 3); ctx.fillRect(8, -3, 3, 3);
+    ctx.fillStyle = '#b45cff'; ctx.fillRect(-24, -24, 10, 10); ctx.fillRect(14, -24, 10, 10);
+    noGlow(); ctx.restore();
+  }
+  // typewriter monologue
+  ctx.textAlign = 'center'; ctx.font = '17px monospace';
+  for (let i = 0; i < WIN_LINES.length; i++) {
+    const start = 1.2 + i * 1.3;
+    if (t < start) break;
+    const n = Math.floor((t - start) * 32);
+    ctx.fillStyle = i < 2 ? '#54ff72' : '#e8f6ff';
+    ctx.fillText(WIN_LINES[i].slice(0, n), cx, 452 + i * 30);
+  }
+  // run stats + restart
+  if (t > 1.2 + WIN_LINES.length * 1.3) {
+    ctx.fillStyle = '#ffef5a';
+    ctx.fillText(`SCORE ${score}   TIME ${Math.floor(runTime / 60)}:${String(Math.floor(runTime % 60)).padStart(2, '0')}   RESETS ${deaths}`, cx, 452 + WIN_LINES.length * 30 + 24);
+    if (Math.floor(performance.now() / 400) % 2) { ctx.fillStyle = '#fff'; ctx.fillText('PRESS SPACE TO RUN IT BACK', cx, 452 + WIN_LINES.length * 30 + 56); }
+  }
+  ctx.textAlign = 'left';
+}
 function drawReady(){ctx.textAlign='center';ctx.font='28px monospace';ctx.fillStyle=Math.floor(readyTimer*6)%2?'#ffef5a':'#fff';ctx.fillText('READY!',W/2,H/2+8);ctx.font='14px monospace';ctx.fillStyle='#7fe6ff';ctx.fillText('GUARDRAILS ONLINE. BE QUICK.',W/2,H/2+34);ctx.textAlign='left';}
 function drawStatus(){ctx.fillStyle='#050815';ctx.fillRect(38,82,W-76,H-120);ctx.strokeStyle='#38c9ff';ctx.lineWidth=3;ctx.strokeRect(38,82,W-76,H-120);ctx.font='26px monospace';ctx.fillStyle='#7fe6ff';ctx.fillText('AI LIVE WIRE',70,130);ctx.font='18px monospace';let y=178;let rows=[['FABLE',live.fable],['MYTHOS',live.mythos],['OPENAI',live.openai],['CLAUDE',live.claude],['LAST CHECK',live.last],['NOTE',live.note]];for(const [a,b] of rows){ctx.fillStyle='#ffef5a';ctx.fillText(a,72,y);ctx.fillStyle='#fff';ctx.fillText(String(b),230,y);y+=38;}ctx.fillStyle='#8cff5a';ctx.fillText('Real service labels are status/ticker data.',72,y+20);ctx.fillStyle='#b45cff';ctx.fillText('Fable/Mythos arcade lore is fictionalized.',72,y+52);ctx.fillStyle='#fff';ctx.fillText('Press T or SPACE to return. Game is paused.',72,y+100);}
 
