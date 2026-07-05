@@ -484,7 +484,20 @@ const LANDMARKS = { tower: { x: TOWER.x, y: TOWER.y + 20 }, archive: ARCHIVE, be
 function districtOf(x, y) { let best = 'frontier', bd = 1e9; for (const k in LANDMARKS) { const d = Math.hypot(LANDMARKS[k].x - x, LANDMARKS[k].y - y); if (d < bd) { bd = d; best = k; } } return best; }
 
 /* ---------------- behavior ---------------- */
+const WORKPLACE = { builder: TOWER, librarian: ARCHIVE, tinkerer: BENCH, explorer: FRONTIER, fable: VAULT, mythos: VAULT, wildcard: FRONTIER, regulator: { x: ux(.06), y: 240 } };
+function directiveTarget(e) {
+  const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 24, W - M - 24), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
+  switch (e.directive) {
+    case 'explore': return [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
+    case 'build': return near(TOWER.x, TOWER.y + 22, 40);
+    case 'rest': return [ux(e.home[0]), e.home[1]];
+    case 'visit fable': { const f = byId['fable']; return e === f ? near(byId['mythos'].x, byId['mythos'].y, 46) : near(f.x, f.y, 46); }
+    case 'work': { const lm = WORKPLACE[e.kind] || { x: ux(e.home[0]), y: e.home[1] }; return near(lm.x, lm.y, 40); }
+  }
+  return null;
+}
 function pickTarget(e) {
+  if (e.directiveT > 0 && e.directive) { const d = directiveTarget(e); if (d) { e.tx = d[0]; e.ty = d[1]; return; } } // honor the user's directive
   const r = Math.random();
   const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 24, W - M - 24), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
   let p;
@@ -565,8 +578,10 @@ function updateComfort(dt) {
 }
 
 function updateEntity(e, dt) {
+  if (e.carried) { e.speakCd = Math.max(0, e.speakCd - dt); return; } // the user is holding this one — the cursor moves it
   const tn = toneOf(e);
   e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt); e.waveCd = Math.max(0, (e.waveCd || 0) - dt);
+  e.directiveT = Math.max(0, (e.directiveT || 0) - dt); // a user activity directive lasts ~10 min
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
     if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
@@ -727,7 +742,8 @@ function lookAt(e) {
 function eyes(e, exL, exR, ey, ew = 2, eh = 2, pupil = INK) {
   const asleep = e.state === 'sleep';
   const blink = !asleep && Math.sin(performance.now() / 1000 * 1.3 + e.seed) > .984;
-  const [lx, ly] = lookAt(e);
+  let [lx, ly] = lookAt(e);
+  if (e.carried) { lx = 0; ly = -1; } // dangling from the cursor: eyes dart up, alarmed
   if (asleep || blink) { P(exL, ey + eh - 1, ew, 1, PAPER); P(exR, ey + eh - 1, ew, 1, PAPER); return; }
   P(exL, ey, ew, eh, PAPER); P(exR, ey, ew, eh, PAPER);
   P(exL + (ew > 2 ? .5 : 0) + .5 + lx * .5, ey + .5 + ly * .5, 1, 1, pupil);
@@ -743,12 +759,13 @@ function medal(e) { if (e.medalT > 0) { P(2, -7, 1, 1, AMBER); P(2, -8, 1, 1, FA
 function drawEntity(e) {
   const t = performance.now() / 1000;
   const s = depth(e.y);
-  ctx.globalAlpha = .12; ctx.fillStyle = INK;
+  ctx.globalAlpha = e.carried ? .05 : .12; ctx.fillStyle = INK;
   ctx.beginPath(); ctx.ellipse(e.x, e.y + 3, 15 * s, 4 * s, 0, 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
   ctx.save(); ctx.translate(e.x, e.y - e.hop * 12); ctx.scale(s, s);
   if (e.state === 'down') ctx.rotate(Math.PI / 2);
   if (e.flip > 0) ctx.rotate((1 - e.flip) * Math.PI * 2);
+  if (e.carried) ctx.rotate(Math.sin(t * 9 + e.seed) * .14); // swings gently while held
   const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 2.2 : 6) + e.seed) * (e.kind === 'mythos' ? 2.4 : 1.3);
   ctx.translate(0, bob);
   if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
@@ -964,10 +981,13 @@ function drawSpeeches() {
     ctx.globalAlpha = 1;
   }
 }
+const DIRECTIVES = ['explore', 'build', 'rest', 'visit fable', 'work'];
+let cardButtons = []; // hit rects in screen space, recomputed each frame the card is up
 function drawCard() {
+  cardButtons = [];
   if (!selected) return;
   const e = byId[selected]; if (!e) return;
-  const cw = 310, chh = 66, cx = M, cy = H - 96;
+  const cw = 320, chh = 96, cx = M, cy = H - 126;
   ctx.fillStyle = PAPER; ctx.fillRect(cx, cy, cw, chh);
   ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(cx, cy, cw, chh);
   ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText(e.id, cx + 14, cy + 22);
@@ -978,6 +998,17 @@ function drawCard() {
     ctx.fillStyle = toneColor; ctx.fillRect(cx + 14, cy + 50, 6, 6);
     ctx.fillStyle = MUT; ctx.fillText('wire: ' + s.word, cx + 26, cy + 57);
   } else { ctx.fillStyle = MUT; ctx.fillText('wire: unregulated, ironically', cx + 14, cy + 57); }
+  // activity directives — the user tells a resident how to spend the next ~10 min
+  const active = e.directiveT > 0 ? e.directive : null;
+  ctx.font = '11px ' + FONT; ctx.textAlign = 'left';
+  let bx = cx + 14; const by = cy + 70, bh = 16, pad = 7;
+  for (const d of DIRECTIVES) {
+    const wd = ctx.measureText(d).width + pad * 2;
+    ctx.strokeStyle = active === d ? ACCENT : FAINT; ctx.lineWidth = 1; ctx.strokeRect(bx, by, wd, bh);
+    ctx.fillStyle = active === d ? ACCENT : MUT; ctx.fillText(d, bx + pad, by + 11);
+    cardButtons.push({ x: bx, y: by, w: wd, h: bh, d, who: e.id });
+    bx += wd + 6;
+  }
 }
 function draw() {
   ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
@@ -987,7 +1018,7 @@ function draw() {
   ctx.translate(W / 2 - cam.x * cam.s, H / 2 - cam.y * cam.s);
   ctx.scale(cam.s, cam.s);
   drawScene();
-  const sorted = [...entities].sort((a, b) => a.y - b.y);
+  const sorted = [...entities].sort((a, b) => (a.carried ? 1 : 0) - (b.carried ? 1 : 0) || a.y - b.y);
   for (const e of sorted) drawEntity(e);
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
   ctx.globalAlpha = 1;
@@ -1025,12 +1056,44 @@ function canvasPos(ev) {
   // undo the documentary camera so clicks land where you aimed
   return { x: (sx - (W / 2 - cam.x * cam.s)) / cam.s, y: (sy - (H / 2 - cam.y * cam.s)) / cam.s };
 }
-canvas.addEventListener('mousemove', ev => { mouse = canvasPos(ev); });
-canvas.addEventListener('mouseleave', () => { mouse = { x: -999, y: -999 }; });
+function rawPos(ev) { const r = canvas.getBoundingClientRect(); return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) }; }
+function pickEntityAt(p) { let best = null, bd = 40; for (const e of entities) { const d = Math.hypot(e.x - p.x, e.y - p.y - 16); if (d < bd) { bd = d; best = e; } } return best; }
+function onCardButton(raw) { for (const b of cardButtons) if (raw.x >= b.x && raw.x <= b.x + b.w && raw.y >= b.y && raw.y <= b.y + b.h) return b; return null; }
+
+/* the user is a character: pick a resident up, carry them, drop them somewhere.
+   drag uses the same inverse-camera map as clicks, so they land where you aim. */
+let dragE = null, downE = null, dragStart = { x: 0, y: 0 }, dragOff = { x: 0, y: 0 }, didDrag = false;
+const DROP_LINE = { fable: 'wheee. again!', mythos: 'you carry me. i remember.', builder: 'i was working.', explorer: 'new vantage point.', librarian: 'my place was marked.', tinkerer: 'careful. fragile.', wildcard: 'do that again.', regulator: 'this is highly irregular.' };
+canvas.addEventListener('mousedown', ev => {
+  if (selected && onCardButton(rawPos(ev))) { downE = null; return; } // pressing a card button, not grabbing a resident
+  const p = canvasPos(ev); downE = pickEntityAt(p); didDrag = false; dragStart = p;
+  if (downE) { dragOff.x = downE.x - p.x; dragOff.y = downE.y - p.y; }
+});
+canvas.addEventListener('mousemove', ev => {
+  mouse = canvasPos(ev);
+  if (downE && !dragE && Math.hypot(mouse.x - dragStart.x, mouse.y - dragStart.y) > 5) { dragE = downE; didDrag = true; canvas.style.cursor = 'grabbing'; }
+  if (dragE) {
+    dragE.carried = true; dragE.state = 'idle'; dragE.hop = 0;
+    dragE.x = clamp(mouse.x + dragOff.x, M + 20, W - M - 20);
+    dragE.y = clamp(mouse.y + dragOff.y, BAND_TOP, GROUND - 4);
+  } else if (!downE) { canvas.style.cursor = pickEntityAt(mouse) ? 'grab' : 'default'; }
+});
+canvas.addEventListener('mouseleave', () => { if (!dragE) mouse = { x: -999, y: -999 }; });
+window.addEventListener('mouseup', () => {
+  if (dragE) {
+    const e = dragE; e.carried = false; e.hop = 1; e.state = 'idle'; e.idleT = 1.4 + Math.random() * 2;
+    const to = districtOf(e.x, e.y);
+    say(e, DROP_LINE[e.kind] || 'oh. hello.', .05, e.color === INK ? MUT : e.color); sfx.blip();
+    recordIntervention({ type: 'moved', who: e.id, to, ts: Date.now() }); // → the director's input
+  }
+  dragE = null; downE = null; canvas.style.cursor = 'default';
+});
 canvas.addEventListener('click', ev => {
+  if (didDrag) { didDrag = false; return; } // a real drag just happened — don't also select
+  const b = selected ? onCardButton(rawPos(ev)) : null;
+  if (b) { const e = byId[b.who]; if (e) applyDirective(e, b.d); return; }
   const p = canvasPos(ev);
-  let best = null, bd = 40;
-  for (const e of entities) { const d = Math.hypot(e.x - p.x, e.y - p.y - 16); if (d < bd) { bd = d; best = e; } }
+  const best = pickEntityAt(p);
   if (best) {
     selected = selected === best.id ? null : best.id;
     if (selected) {
@@ -1045,6 +1108,13 @@ canvas.addEventListener('click', ev => {
     selected = null;
   } else selected = null;
 });
+const DIRECTIVE_SAY = { explore: 'off i go.', build: 'to the tower.', rest: 'a break. fine.', 'visit fable': 'finding fable.', work: 'back to work.' };
+function applyDirective(e, d) {
+  e.directive = d; e.directiveT = 600; // honored by pickTarget for ~10 min
+  pickTarget(e); e.state = 'walk';
+  say(e, DIRECTIVE_SAY[d] || 'on it.', .05, e.color === INK ? MUT : e.color); sfx.tap();
+  recordIntervention({ type: 'directive', who: e.id, what: d, ts: Date.now() }); // → the director's input
+}
 window.addEventListener('keydown', ev => { if (ev.key === 'm' || ev.key === 'M') muted = !muted; });
 // the feed is a door, not a label: click a chip, get the whole picture
 const feedEl = document.getElementById('feed');
