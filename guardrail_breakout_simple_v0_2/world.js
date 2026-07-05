@@ -295,18 +295,15 @@ function strongestHeadline() {
   for (const id in news) { const n = news[id]; if (!best || n.points > best.points) best = { id, title: n.title, points: n.points, cls: n.cls }; }
   return best;
 }
-function quietTheme() { // a title for a day with no headline, drawn from the world's own persistents
-  return ['the tower rises', 'the archive grows', 'the long trail home', 'a quiet day in continuum', 'business as usual'][worldDay % 5];
-}
+// quiet-day fallback titles, rotated by worldDay so consecutive quiet days never
+// repeat a title (Fable §6 ruling 3). only used when the director omits an episode.
+const QUIET_THEMES = ['the tower rises', 'the archive grows', 'the long trail home', 'a quiet day in continuum', 'business as usual'];
+function quietTheme() { return QUIET_THEMES[worldDay % QUIET_THEMES.length]; }
 const STAGE_OF = { builder: 'tower', librarian: 'archive', tinkerer: 'bench', explorer: 'frontier', wildcard: 'frontier', fable: 'vault', mythos: 'vault' };
 function deriveStage(strong) { // the landmark the strongest headline's mascot works at
   if (!strong) return null;
   const e = entities.find(x => x.wireId === strong.id);
   return e ? (STAGE_OF[e.kind] || null) : null;
-}
-// the evening resolution poster — guaranteed once per day, kicker "day N — <episode>"
-function scheduleResolutionPoster() {
-  announce('day ' + worldDay + ' — ' + world.episode, 'curtain.', VIOLET, (world.arc || 'that was today.').slice(0, 70), null);
 }
 function buildDirectorState() {
   const act = actInfo();
@@ -406,15 +403,24 @@ function applyDirectorResult(ok) {
   }
   // the crowd gathers where the story is: today's cast drives the set-piece bias
   world.episodeCast = Array.from(new Set([...(world.episodeCast || []), ...ok.beats.map(b => b.who)])).slice(-8);
-  saveWorld();
-  beatQueue = ok.beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / ok.beats.length) })); beatClock = 0;
-  interventions = []; // cleared after each successful director tick
-  // §6 — the evening resolution: the day must close on a poster (kicker
-  // "day N — <episode>"). guaranteed once, on the first evening tick that has an episode.
+  // §6 — the evening resolution: the day closes on ONE poster, fired exactly once
+  // (kicker "day N — <episode>"). Hybrid authorship (Fable §6 ruling 1): the director
+  // may author the word/tone/sub via a poster beat this evening; the engine owns the
+  // frame and the guarantee. Missing/invalid → curtain./violet/sub = arc. The chosen
+  // poster beat becomes the resolution and is pulled from the queue so it never doubles.
+  let beats = ok.beats;
   if (actInfo().i === 3 && world.resolvedDay !== worldDay && world.episode) {
-    world.resolvedDay = worldDay; saveWorld();
-    scheduleResolutionPoster();
+    world.resolvedDay = worldDay;
+    const pbIdx = beats.findIndex(b => b.do === 'poster' && b.poster);
+    const p = pbIdx >= 0 ? beats[pbIdx].poster : null;
+    announce('day ' + worldDay + ' — ' + world.episode,
+      p ? p.word : 'curtain.', p ? p.toneColor : VIOLET,
+      (p && p.sub) ? p.sub : (world.arc || 'that was today.').slice(0, 70), null);
+    if (pbIdx >= 0) beats = beats.slice(0, pbIdx).concat(beats.slice(pbIdx + 1));
   }
+  saveWorld();
+  beatQueue = beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / (beats.length || 1)) })); beatClock = 0;
+  interventions = []; // cleared after each successful director tick
 }
 async function runDirector() {
   if (directorBusy || !ollamaModel) return;
