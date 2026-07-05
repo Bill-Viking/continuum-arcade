@@ -1,0 +1,4 @@
+#!/bin/bash
+APP_RESOURCES="$(cd "$(dirname "$0")/../Resources/app" && pwd)"
+cd "$APP_RESOURCES"
+exec /usr/bin/python3 "$APP_RESOURCES/mythos_doom_gui.py"

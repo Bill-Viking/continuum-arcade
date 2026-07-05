@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Guardrail Breakout v0.2</title>
+<style>
+  html,body{margin:0;background:#020208;color:#e8f6ff;height:100%;font-family:monospace;overflow:hidden}
+  #wrap{display:flex;align-items:center;justify-content:center;height:100%;background:radial-gradient(circle at center,#111226 0,#03030a 65%,#000 100%)}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;max-width:100vw;max-height:100vh;box-shadow:0 0 24px #3cc9ff66,0 0 60px #ff2d5540;background:#000;border:2px solid #111}
+  #hint{position:fixed;left:12px;bottom:10px;color:#7fe6ff;font-size:12px;opacity:.72;text-shadow:0 0 6px #000}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game" width="640" height="720"></canvas></div>
+<div id="hint">ARROWS/WASD move • SPACE start/restart • T status wire • M mute</div>
+<script src="game.js"></script>
+</body>
+</html>
