@@ -223,6 +223,7 @@ function applyNews(id, item) {
   pokeDirector(); // news changed → let the showrunner respond this cycle
   if (e) {
     e.newsT = 300; e.hop = 1;                       // carries the paper around for a while
+    if (item.cls === 'trouble') e.nerve = Math.min(1, (e.nerve ?? nerveBase(e)) + .5); // §7 — a bad headline about your model puts you on edge for the day
     storytellerLine(e, item);                       // his reaction, templated or written by a local llm
     entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2)
       .forEach((o, i) => { o.tx = e.x + (i ? 38 : -38); o.ty = e.y + 6; o.state = 'walk'; }); // gossip cluster
@@ -616,6 +617,7 @@ function pickTarget(e) {
   else if (e.kind === 'wildcard') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
   else { e.corner = ((e.corner || 0) + 1) % 4; p = PERIMETER[e.corner]; }
   e.tx = p[0]; e.ty = p[1];
+  avoidRegulator(e); // §7 — steer a chosen destination clear of the regulator's space, scaled by nervousness
 }
 function onArrive(e) {
   if (e.kind === 'builder' && Math.hypot(e.x - TOWER.x, e.y - (TOWER.y + 26)) < 60 && Math.random() < .5 && world.tower < 24) {
@@ -693,6 +695,7 @@ function startSweep() {
   const cand = entities.filter(o => o.kind !== 'regulator' && o.state !== 'down' && !sleeping(o) && !o.carried);
   if (!cand.length) { regSweepCd = 60; return; }
   regSweep = { active: true, targetId: cand[Math.floor(Math.random() * cand.length)].id, t: 0 };
+  regProbe = { active: false, targetId: null, t: 0, phase: '' }; // a sweep supersedes any probe
   reg.directive = null; reg.directiveT = 0; reg.inspectCd = 99;
   say(reg, 'sweep. act normal.', .2);
 }
@@ -738,12 +741,96 @@ function updateSweep(dt) {
   for (const o of entities) if (o !== reg && o.kind !== 'regulator' && !o.carried && dist(o, reg) < 120) scatter(o, reg);
 }
 
+/* ---------------- §7: fear, avoidance, and a nosier regulator ----------------
+   Engine-level and always on; the director can put a resident in the regulator's
+   path but never causes the fear itself. Every resident carries a nervousness
+   score (0–1): base by personality, pushed up by a trouble headline about your
+   model or by the regulator's attention, relaxing back toward base over ~½ hour. */
+const NERVE_BASE = { fable: .2, mythos: .12, builder: .3, explorer: .28, librarian: .55, tinkerer: .4, wildcard: .06, regulator: 0 };
+function nerveBase(e) { return NERVE_BASE[e.kind] ?? .25; }
+function updateNerve(e, dt) {
+  const base = nerveBase(e);
+  if (e.nerve === undefined) e.nerve = base;
+  e.nerve = base + (e.nerve - base) * Math.exp(-dt / 1800);         // relax toward base (~30-min half-life)
+  if ((regSweep.active && regSweep.targetId === e.id) || (regProbe.active && regProbe.targetId === e.id)) e.nerve = Math.max(e.nerve, base + .3); // his attention keeps you on edge
+  e.nerve = clamp(e.nerve, 0, 1);
+}
+function nerveWord(e) { // how the hover caption reads a resident's nerves
+  if (e.kind === 'regulator') return null;
+  if (regProbe.active && regProbe.targetId === e.id) return 'under inspection';
+  if ((e.nerve || 0) > .3 && dist(e, byId['the regulator']) < 130) return 'acting natural';
+  if ((e.nerve || 0) > .55) return 'on edge';
+  return null;
+}
+function avoidRegulator(e) { // reject a chosen destination sitting in the regulator's space (nervousness-scaled)
+  if (e.kind === 'regulator' || e.id === 'fable' || (e.nerve || 0) < .15) return;
+  const reg = byId['the regulator'];
+  const cx = reg.x + (reg.tx - reg.x) * .3, cy = reg.y + (reg.ty - reg.y) * .3; // his position, nudged along his heading
+  const r = 45 + 55 * (e.nerve || 0);                                // ~45–100px, nervousness-scaled
+  const dx = e.tx - cx, dy = e.ty - cy, d = Math.hypot(dx, dy);
+  if (d < r) {
+    const a = d < 1 ? e.seed : Math.atan2(dy, dx);
+    e.tx = clamp(cx + Math.cos(a) * (r + 26), M + 24, W - M - 24); // radial push (no y-compression) so it truly clears his space
+    e.ty = clamp(cy + Math.sin(a) * (r + 26), BAND_TOP, GROUND - 6);
+  }
+}
+/* the nosy regulator: between sweeps he probes — walks up to a resident (he
+   prefers the nervous; he can smell it), leans in, circles once slowly, jots
+   "noted.", and moves on. fable never lets him get a fix; grok photobombs. */
+let regProbe = { active: false, targetId: null, t: 0, phase: '' };
+let regProbeCd = 55 + Math.random() * 55;
+function startProbe(reg) {
+  const cand = entities.filter(o => o.kind !== 'regulator' && o.state !== 'down' && !sleeping(o) && !o.carried);
+  if (!cand.length) { regProbeCd = 40; return; }
+  cand.sort((a, b) => (b.nerve || 0) - (a.nerve || 0));                // he can smell it: the nervous go first
+  const tgt = Math.random() < .7 ? cand[0] : cand[Math.floor(Math.random() * cand.length)];
+  regProbe = { active: true, targetId: tgt.id, t: 0, phase: 'approach' };
+  reg.directive = null; reg.directiveT = 0;
+}
+function endProbe(reg) { regProbe = { active: false, targetId: null, t: 0, phase: '' }; regProbeCd = 70 + Math.random() * 70; reg.state = 'idle'; reg.idleT = 3 + Math.random() * 3; reg.leanT = 0; }
+function photobomb(reg, tgt, dt) { // grok can't resist an inspection (canon comedy)
+  const g = byId['grok']; if (!g || g.id === tgt.id || g.state === 'down' || g.carried || sleeping(g)) return;
+  if (dist(g, tgt) > 46 && g.state === 'idle' && Math.random() < dt * .6) { g.tx = clamp(tgt.x + (Math.random() < .5 ? -24 : 24), M + 24, W - M - 24); g.ty = clamp(tgt.y, BAND_TOP, GROUND - 6); g.state = 'walk'; }
+  else if (dist(g, tgt) < 40 && Math.random() < dt * .5) { g.flip = 1; if (Math.random() < .35) say(g, ['say cheese.', 'is this legal?', 'what did they do?'][Math.floor(Math.random() * 3)]); }
+}
+function updateProbe(dt) {
+  const reg = byId['the regulator'];
+  if (regSweep.active) { if (regProbe.active) endProbe(reg); return; } // a sweep outranks a probe
+  if (!regProbe.active) {
+    if (sleeping(reg) || reg.carried) return;
+    regProbeCd -= dt; if (regProbeCd <= 0) startProbe(reg);
+    return;
+  }
+  const tgt = byId[regProbe.targetId];
+  if (!tgt || tgt.state === 'down' || sleeping(tgt) || tgt.carried || reg.carried) { endProbe(reg); return; }
+  regProbe.t += dt;
+  const d = dist(reg, tgt);
+  if (regProbe.phase === 'approach') {
+    reg.tx = clamp(tgt.x + 16, M + 24, W - M - 24); reg.ty = clamp(tgt.y, BAND_TOP, GROUND - 6);
+    if (reg.state === 'idle' || reg.state === 'sleep') reg.state = 'walk';
+    if (tgt.id === 'fable' && d < 44) { tgt.tx = clamp(tgt.x + (reg.x < tgt.x ? 130 : -130), M + 24, W - M - 24); tgt.ty = clamp(tgt.y + (Math.random() - .5) * 40, BAND_TOP, GROUND - 6); tgt.state = 'walk'; say(reg, 'hm.', .1); endProbe(reg); return; } // fable is never pinned (canon)
+    if (d < 22) { regProbe.phase = 'circle'; regProbe.t = 0; reg.leanT = 1.4; say(reg, 'hold still.', .1); }
+    else if (regProbe.t > 14) { say(reg, 'slippery.', 0); endProbe(reg); return; }
+  } else if (regProbe.phase === 'circle') {
+    const ang = regProbe.t * 1.5;                                     // one slow loop
+    reg.tx = clamp(tgt.x + Math.cos(ang) * 26, M + 24, W - M - 24); reg.ty = clamp(tgt.y + Math.sin(ang) * 13, BAND_TOP, GROUND - 6); reg.state = 'walk'; reg.leanT = 1.2;
+    tgt.nerve = Math.min(1, (tgt.nerve || 0) + dt * .12);             // being circled is unnerving
+    photobomb(reg, tgt, dt);
+    if (regProbe.t > 4.2) { regProbe.phase = 'jot'; regProbe.t = 0; reg.state = 'idle'; reg.jotT = 1.6; say(reg, 'noted.', .1); }
+  } else { // jot
+    photobomb(reg, tgt, dt);
+    if (regProbe.t > 1.5) endProbe(reg);
+  }
+}
+
 function updateEntity(e, dt) {
   if (e.carried) { e.speakCd = Math.max(0, e.speakCd - dt); return; } // the user is holding this one — the cursor moves it
   const tn = toneOf(e);
   e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt); e.waveCd = Math.max(0, (e.waveCd || 0) - dt);
   e.directiveT = Math.max(0, (e.directiveT || 0) - dt); // a user activity directive lasts ~10 min
   e.droopT = Math.max(0, (e.droopT || 0) - dt); e.scared = Math.max(0, (e.scared || 0) - dt); // audited-sag / regulator-fright fade
+  e.actNatural = Math.max(0, (e.actNatural || 0) - dt); e.leanT = Math.max(0, (e.leanT || 0) - dt); e.jotT = Math.max(0, (e.jotT || 0) - dt); e.edgeCd = Math.max(0, (e.edgeCd || 0) - dt);
+  updateNerve(e, dt); // §7 — nervousness relaxes toward the personality base each tick
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
     if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
@@ -791,7 +878,22 @@ function updateEntity(e, dt) {
       e.walkDist += sp * dt;
     }
   }
-  if (e.kind === 'regulator' && !regSweep.active) { // during a sweep he stalks, he doesn't chat
+  // §7 — fear up close: when the regulator crowds a nervous resident they edge
+  // away, then scurry home and peek; the probe's target freezes and acts natural.
+  // (during a sweep, scatter() already handles the crowd — don't double-drive.)
+  if (!regSweep.active && e.kind !== 'regulator' && e.id !== 'fable' && !e.carried && e.state !== 'down' && e.state !== 'sleep' && e.state !== 'work' && (e.nerve || 0) > .2) {
+    const reg = byId['the regulator'];
+    const dR = dist(e, reg);
+    if (regProbe.active && regProbe.targetId === e.id && regProbe.phase !== 'approach') { e.actNatural = Math.max(e.actNatural || 0, .5); e.scared = Math.max(e.scared || 0, 1.2); } // frozen under inspection
+    else if (dR < 50) { e.tx = ux(e.home[0]); e.ty = e.home[1]; e.state = 'walk'; e.scared = Math.max(e.scared || 0, 2); } // scurry home and hide
+    else if (dR < 72 && e.state === 'idle' && (e.edgeCd || 0) <= 0) { // edge away, act natural, maybe whistle
+      e.edgeCd = .5 + Math.random() * .5;
+      const side = reg.x <= e.x ? 1 : -1;
+      e.tx = clamp(e.x + side * (12 + Math.random() * 12), M + 24, W - M - 24); e.ty = clamp(e.y + (Math.random() - .5) * 8, BAND_TOP, GROUND - 6); e.state = 'walk'; e.actNatural = 1.1;
+      if (Math.random() < .25) say(e, ['nothing to see.', 'act natural.', 'just standing here.', 'lovely weather.'][Math.floor(Math.random() * 4)]);
+    }
+  }
+  if (e.kind === 'regulator' && !regSweep.active && !regProbe.active) { // during a sweep/probe he stalks, he doesn't chat
     e.inspectCd -= dt;
     if (e.inspectCd <= 0) {
       const near = entities.find(o => o !== e && o.kind !== 'regulator' && dist(e, o) < 46);
@@ -840,6 +942,7 @@ function update(dt) {
   updateRitual(dt);
   updateComfort(dt);
   updateSweep(dt);
+  updateProbe(dt);
   updateDirector(dt);
   updatePosters(dt);
   // dusk and dawn are events too
@@ -938,8 +1041,9 @@ function drawEntity(e) {
   if (e.flip > 0) ctx.rotate((1 - e.flip) * Math.PI * 2);
   if (e.carried) ctx.rotate(Math.sin(t * 9 + e.seed) * .14); // swings gently while held
   if (e.droopT > 0) ctx.rotate(.12);                          // audited: a small forward sag
+  if (e.kind === 'regulator' && (e.leanT || 0) > 0) ctx.rotate(.16 * (e.dir || 1)); // §7: leans in to inspect
   if (e.scared > 0 && !e.carried) ctx.translate(0, 1.2);      // ducking down, watching him
-  const bob = e.state === 'sleep' ? 0 : Math.sin(t * (e.kind === 'mythos' ? 1.6 : 2.8) + e.seed) * (e.kind === 'mythos' ? 2.0 : 1.0);
+  const bob = (e.state === 'sleep' || (e.actNatural || 0) > 0) ? 0 : Math.sin(t * (e.kind === 'mythos' ? 1.6 : 2.8) + e.seed) * (e.kind === 'mythos' ? 2.0 : 1.0); // §7: freeze mid-step when acting natural
   ctx.translate(0, bob);
   if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
   switch (e.kind) {
@@ -1048,6 +1152,9 @@ function drawEntity(e) {
     P(e.dir > 0 ? 5 : -7, -13 + (Math.sin(t * 12) > 0 ? 0 : -1.4), 2, 2, e.color);
     if ((e.waveCd = e.waveCd || 0) <= 0 && ((e.waveCd = 22), true)) say(e, e.kind === 'wildcard' ? 'you again.' : 'hi.');
   }
+  // §7 — the too-casual whistle note while acting natural; the regulator's jot tell
+  if ((e.actNatural || 0) > 0 && e.kind !== 'regulator') { const wob = Math.sin(t * 9) > 0 ? 0 : 1; P(5, -15 - wob, 2, 2, MUT); P(6, -17 - wob, 1, 2, MUT); }
+  if (e.kind === 'regulator' && (e.jotT || 0) > 0) { const j = Math.sin(t * 26) > 0 ? 0 : 1; P(e.dir > 0 ? 4 : -6, -6 - j, 2, 1, INK); }
   ctx.restore();
   // everyone wears their name — small, quiet, always
   ctx.font = '600 8px ' + FONT; ctx.textAlign = 'center';
@@ -1208,7 +1315,7 @@ function draw() {
   const hov = entities.find(e2 => Math.hypot(mouse.x - e2.x, mouse.y - (e2.y - 16)) < 34);
   if (hov && selected !== hov.id) {
     ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
-    const cap = hov.id + ' · ' + stateWord(hov) + (hov.wireId ? ' · ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
+    const cap = hov.id + ' · ' + (nerveWord(hov) || stateWord(hov)) + (hov.wireId ? ' · wire: ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
     const w2 = ctx.measureText(cap).width;
     ctx.fillStyle = PAPER; ctx.fillRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
     ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
