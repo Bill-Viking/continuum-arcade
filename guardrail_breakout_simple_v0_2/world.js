@@ -95,13 +95,16 @@ async function fetchWire(m) {
 async function checkStatus() {
   const before = {}; WIRE.forEach(m => before[m.id] = wire[m.id].tone);
   await Promise.allSettled(WIRE.map(fetchWire));
+  let toneChanged = false;
   WIRE.forEach(m => {
+    if (before[m.id] !== wire[m.id].tone) toneChanged = true;
     if ((before[m.id] === 'amber' || before[m.id] === 'red') && wire[m.id].tone === 'green') celebrate(m.id);
     if (before[m.id] !== 'red' && before[m.id] !== 'gray' && wire[m.id].tone === 'red') {
       const e = entities.find(x => x.wireId === m.id);
       announce(m.id + ' — wire down', 'down hard.', RED, 'mythos is already on his way.', e || null, { prio: 2 });
     }
   });
+  if (toneChanged) pokeDirector(); // a wire changed state → let the showrunner respond this cycle
   renderFeed();
 }
 function renderFeed() {
@@ -194,7 +197,9 @@ function applyNews(id, item) {
   world.seenNews.push(key); world.seenNews = world.seenNews.slice(-50); saveWorld();
   const [word, dotColor] = NEWS_WORD[item.cls];
   const e = entities.find(x => x.wireId === id) || null;
+  // the news poster cites a real headline, so its sub IS that headline (fact stays linked)
   announce('the wire — ' + id, word, dotColor, item.title.toLowerCase().slice(0, 66) + (item.title.length > 66 ? '…' : '') + '  ·  hn ' + item.points + 'pts', e);
+  pokeDirector(); // news changed → let the showrunner respond this cycle
   if (e) {
     e.newsT = 300; e.hop = 1;                       // carries the paper around for a while
     storytellerLine(e, item);                       // his reaction, templated or written by a local llm
@@ -243,6 +248,7 @@ const DIRECTOR_SYS = [
   'Landmark ids for "to": tower, archive, bench, vault, frontier. "to" may also be null.',
   '"do" MUST be one of exactly: goto, meet, say, chase, hide, celebrate, inspect, poster. No other verbs.',
   'Grow the story from the current arc and today\'s news: a headline about a model becomes that mascot\'s day — celebration, defensiveness, rivalry, or gossip. Gentle, deadpan, family-friendly. Never repeat the recent arcs.',
+  'When a news item is trouble-class (cls "trouble"), the regulator opens an inquiry into that mascot: he struts over and inspects, files reports, and his poster word ends in "cleared." or "noted.". Any poster that cites a headline must use that real headline text as its sub.',
   'Shape: {"arc":"one short line","beats":[{"who":id,"do":verb,"to":id-or-null,"line":"<=8 lowercase words or null","poster":object-or-null}]}',
   'poster is used ONLY when do="poster": {"kicker":"<=40 chars","word":"oneword.","tone":"green|amber|red|cobalt|violet|ink","sub":"<=70 chars"}. Otherwise poster is null.',
   'Aim for 3 to 4 beats and, when there is news, include one "poster" beat that reacts to a specific headline. Keep every line short. Output only the json.',
@@ -697,7 +703,11 @@ function narratorText() {
   const amber = WIRE.find(m => wire[m.id].tone === 'amber');
   if (amber) items.push(amber.id + ' is patching — ' + (wire[amber.id].headline || 'a bit wobbly').slice(0, 58) + '.');
   const ids = Object.keys(news);
-  if (ids.length) { const id = ids[Math.floor(Date.now() / 9000) % ids.length]; items.push(id + ' made the news: ' + news[id].title.toLowerCase().slice(0, 58) + '.'); }
+  if (ids.length) {
+    const id = ids[Math.floor(Date.now() / 9000) % ids.length];
+    const g = world.glosses[id + '::' + news[id].title]; // the director's plain-words gloss, if it has one
+    items.push(g ? id + ' in the news — ' + g.slice(0, 72) : id + ' made the news: ' + news[id].title.toLowerCase().slice(0, 58) + '.');
+  }
   const walker = entities.find(e => e.state === 'walk' && e.kind !== 'regulator');
   if (walker) items.push(walker.id + ' is ' + stateWord(walker) + '.');
   if (!items.length) return 'a quiet day in continuum.';
