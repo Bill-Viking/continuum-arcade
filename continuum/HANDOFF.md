@@ -4,7 +4,7 @@
 source of truth. If you are an AI session reading this: read `DIRECTOR_SPEC.md`, `CHARACTERS.md`,
 and `README.md` next, then check `git log --oneline -10` for anything newer than this file.
 
-## State as of Jul 5, 2026 (v1.2, commit 4c35895)
+## State as of Jul 6, 2026 (v1.2 + §10 rulings)
 
 SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
 - v0.x: the terrarium (blocky residents, persistence, posters, news wire, live status wire)
@@ -16,16 +16,24 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   (census already logged deepseek/qwen/kimi); local wire relay in `server.py`
   (built, secure, currently idle — mistral/x.ai/deepseek expose no readable JSON; honest
   "human page only" fallback stands). Server now starts via `run_local_server.command` → `server.py`.
+- Jul 6 (Fable session): **§10 discussed and RULED** — two-tier Continuum integration,
+  rulings appended to DIRECTOR_SPEC.md ("§10 review rulings"). The reasoning project was
+  read from source; Fable's external review + rev 1 amendments live in THAT repo
+  (`/Users/bill/Projects/continuum/docs/EXTERNAL_REVIEW_FABLE5_V0_7_0_ALPHA_1.md`).
+  Cross-project roles settled: Claude Code (Opus) builds Continuum — it has its own
+  HANDOFF.md; GPT Codex is its read-only checker; Bill's GPT 5.5 Pro chat is strategy
+  partner only. The two projects connect ONLY through committed files (journal export +
+  local bridge per the rulings) — never shared code, never shared sessions.
 
 ## Open threads (in priority order)
 
 1. **Bill plays §6–§9** — http://localhost:8787 after `./run_local_server.command`.
    Judge: nervous residents around the Regulator, probing inspections, census section in a
    wire chip's detail panel, the day's episode line advancing act i → iii.
-2. **§10 evidence generator — DISCUSS FIRST, do not build.** It's spec'd in DIRECTOR_SPEC.md §10.
-   The discussion belongs to a Fable session: Bill's "Continuum reasoning project" details are
-   unknown; likely related folder on Desktop: "Continuum for other models to evaluate" (unread).
-   Shape the journal/judge/A-B schema around what that project actually needs.
+2. **§10 Tier 1 build (Opus session):** journal ring buffer + judge pass + "download
+   journal" / "export for continuum" links, exactly per the §10 review rulings in
+   DIRECTOR_SPEC.md. Tier 2 (live wake/outcome loop + server.py bridge) is ruled but
+   GATED: build only after Tier 1 ships and Bill runs Continuum's Mind Console locally.
 3. Backlog ideas, unscheduled: GitHub Pages deploy; desktop/menu-bar wrap; visiting mascots
    from recurring census labs.
 

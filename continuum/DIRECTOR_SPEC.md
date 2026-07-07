@@ -167,3 +167,54 @@ days. Formalizing that:
   compared — continuity-of-mind as a measurable, not a vibe.
 - Fact/fiction law extends: the journal is *evidence about the fiction layer* and says so in its
   header. No claims about the real companies, ever.
+
+## §10 review rulings (Fable, Jul 6) — two tiers, approved for build
+
+Context: the "Continuum reasoning project" is real and was read from source — a local-first,
+review-gated functional-continuity layer at `/Users/bill/Projects/continuum` (own HANDOFF.md;
+Fable's source-grounded external review lives in that repo's docs/). §10 ships in two tiers.
+Laws that bound both: the terrarium stays art-first (the journal is a tap on the side of the
+aquarium, not the reason the fish exist); no Continuum code is ever imported; every feature is
+fail-soft — Continuum absent → world identical, zero console errors (the Ollama-offline pattern).
+
+1. **Journal (Tier 1) — build first.** JSONL, one entry per director exchange:
+   `{ts, day, episode, act, model, input_digest, raw_output, beats_kept, beats_dropped,
+   callback, judge}`, in a localStorage ring buffer (cap 200 entries — localStorage is ~5MB
+   and already holds the save). Theater-layer footer gains two links: "download journal"
+   (raw JSONL) and "export for continuum" — the same entries rendered as markdown in
+   Continuum's legacy import format, verified against source (`ENTRY_PATTERN`,
+   runtime/events.py:13-19): `## YYYY-MM-DD HH:MM:SS` heading, then
+   `terrarium-director: <one-paragraph digest of the exchange>` — the `role:` prefix is
+   REQUIRED or the importer skips the entry. Bill drops the exported file into Continuum's
+   `logs/raw_conversations/`; import needs zero Continuum-side code. The journal header
+   states the law: evidence about the fiction layer; no claims about real companies.
+2. **Judge pass — approved as spec'd, with an output contract.** Once per evening (after
+   the resolution poster), same Ollama, low temperature. Input: today's journal entries +
+   yesterday's arcLog line. Output strict JSON: `{callback_match: bool,
+   contradictions: ["..."], score: 0-5, judgment: "one line"}` — validate hard, discard on
+   failure, journal entry still written. Judge output goes to the journal only, never the
+   world UI (no new visual elements).
+3. **A/B directors — approved as spec'd.** `?director=<model>` overrides largest-model
+   preference; the journal's per-entry `model` field is what makes journals comparable.
+4. **Tier 2 (live loop) — approved, gated: build only after Tier 1 ships and Bill runs
+   Continuum's Mind Console locally.** The prize: the terrarium becomes Continuum's first
+   live host. At the first director tick of a day, fetch a wake packet (request_text = the
+   compact day-state digest) and inject returned memory copies into the director prompt as
+   a `remembered:` block appended to DIRECTOR_SYS (extend, never rewrite it). After the
+   judge pass, POST record-outcome: `outcome_label` mapped from score (≥4 success, 2–3
+   partial, ≤1 failure; judge invalid → skip entirely), one attribution per retrieved
+   memory with `utility_label` + `rationale` prefixed `terrarium-judge:<model>` — machine
+   judgment must never masquerade as Bill's. Payload shape verified against
+   runtime/mind_console.py:785 and runtime/database.py:1137-1289.
+5. **Transport ruling.** The §9 relay stays untouched — GET-only, https-only, external
+   allowlist; its security posture is not to be loosened for this. Tier 2 gets a separate,
+   explicit bridge in `server.py`: `POST /continuum/wake` and `POST /continuum/outcome`,
+   proxied ONLY to `localhost:<port>`, with port and `X-Continuum-Token` read from
+   `continuum_bridge.json` (gitignored; Bill pastes port+token once per Mind Console
+   start). No bridge file → Tier 2 silently off, nothing rendered.
+6. **Verification checklist.** Continuum absent / bridge file missing → world identical,
+   no console errors. Journal survives reload; ring cap enforced. One manual round-trip
+   with Bill before calling Tier 1 done: export → drop into raw_conversations/ →
+   Continuum imports and consolidates it. Judge malformed → discarded silently.
+   Fact/fiction: journal and judge text never render in the factual (linked) panel
+   sections.
