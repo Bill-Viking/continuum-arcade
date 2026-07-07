@@ -6,7 +6,7 @@ and `README.md` next, then check `git log --oneline -10` for anything newer than
 
 ## State as of Jul 5, 2026 (v1.2, commit 4c35895)
 
-SHIPPED and pushed to github.com/Bill-Viking/guardrail-breakout (main):
+SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
 - v0.x: the terrarium (blocky residents, persistence, posters, news wire, live status wire)
 - v1.0 showrunner §1–§5: local-LLM director (Ollama; prefers largest model — Bill has
   qwen2.5:32b/7b/3b), news→story, drag residents + directives, Regulator sweeps
@@ -54,9 +54,9 @@ SHIPPED and pushed to github.com/Bill-Viking/guardrail-breakout (main):
 ## Paste-prompts for new sessions
 
 **Opus build session:**
-> Read guardrail_breakout_simple_v0_2/HANDOFF.md and follow it. Then: <the one task>.
+> Read continuum/HANDOFF.md and follow it. Then: <the one task>.
 > Respect the working protocol and environment gotchas. Commit per piece, push, update HANDOFF.md.
 
 **Fable review session:**
-> Read guardrail_breakout_simple_v0_2/HANDOFF.md. I want your judgment on: <the thing>.
+> Read continuum/HANDOFF.md. I want your judgment on: <the thing>.
 > Don't build unless I say so; spec approved changes into DIRECTOR_SPEC.md for an Opus session.

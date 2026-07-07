@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "guardrail",
+      "name": "continuum",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8787", "--directory", "guardrail_breakout_simple_v0_2"],
+      "runtimeArgs": ["-m", "http.server", "8787", "--directory", "continuum"],
       "port": 8787
     }
   ]
