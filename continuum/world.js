@@ -60,6 +60,7 @@ world.episodeCast = world.episodeCast || []; // resident ids the episode involve
 world.episodeHeadline = world.episodeHeadline || ''; // strongest-headline key the episode was named after
 world.resolvedDay = world.resolvedDay || 0;  // the worldDay the evening resolution poster fired
 world.census = world.census || {};           // §8 — models perplexity has spotted across the whole field
+world.judgedDay = world.judgedDay || 0;      // §10 — the worldDay the evening judge pass last ran
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -404,6 +405,68 @@ async function journalDirector(state, opts, raw, parsed, ok) {
     judge: null, // reserved: the evening judge appends its own entry (append-only — this one is never edited)
   });
 }
+/* §10 — the continuity judge: once per evening, after the resolution poster,
+   the same Ollama at low temperature grades the day: did the morning callback
+   actually reference yesterday's arc? did any beat contradict the episode?
+   Contract (ruling 2): {callback_match, contradictions, score 0-5, judgment} —
+   validated hard, discarded on failure, the journal entry written either way,
+   with full judge provenance (model + digest + decoding + prompt hash). Each
+   contradiction must quote the offending line — the evidence span. The ruling
+   goes to the journal ONLY, never the world UI. */
+const JUDGE_SYS = [
+  'You are the continuity judge for "Continuum", a fictional terrarium show. You grade ONE day of the director\'s journal for narrative continuity.',
+  'Emit ONE compact json object and nothing else: {"callback_match":true|false,"contradictions":["..."],"score":0-5,"judgment":"one short lowercase line"}.',
+  'callback_match: the first entry may carry callback.expected (yesterday\'s arc) and callback.first_line (the morning opener) — true only if the opener genuinely references that arc; false if it does not or if either is missing.',
+  'contradictions: beats or lines that contradict the day\'s episode, the arc, or each other. QUOTE the offending line as evidence. Empty array if none.',
+  'score: 0 to 5 for the day\'s continuity as one serialized episode (5 = every act moved the same story forward).',
+  'This is fiction about mascots; never judge real-world accuracy. Output only the json.',
+].join(' ');
+const JUDGE_OPTS = { temperature: .2, num_predict: 300 };
+let judgeBusy = false, judgeCd = 0;
+function coerceJudge(o) { // validate hard: wrong shape anywhere → the whole ruling is discarded
+  if (!o || typeof o !== 'object' || typeof o.callback_match !== 'boolean' || !Array.isArray(o.contradictions)) return null;
+  const score = Math.round(Number(o.score));
+  if (!Number.isFinite(score) || score < 0 || score > 5) return null;
+  const judgment = typeof o.judgment === 'string' ? o.judgment.trim().toLowerCase().slice(0, 160) : '';
+  if (!judgment) return null;
+  const contradictions = o.contradictions.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim().slice(0, 160)).slice(0, 6);
+  return { callback_match: o.callback_match, contradictions, score, judgment };
+}
+async function runJudge() {
+  if (judgeBusy || !ollamaModel) return;
+  const today = journal.filter(en => en.type === 'director' && en.day === worldDay);
+  if (!today.length) { world.judgedDay = worldDay; saveWorld(); return; } // nothing to grade today
+  judgeBusy = true;
+  const withCb = today.find(en => en.callback);
+  const input = {
+    day: worldDay, episode: world.episode || '',
+    yesterdayArc: withCb ? (withCb.callback.expected || '') : '',
+    entries: today.map(en => ({
+      id: en.id, act: en.act, callback: en.callback,
+      beats: en.beats_kept.map(b => b.who + ' ' + b.do + (b.to ? ' to ' + b.to : '') + (b.line ? ': "' + b.line + '"' : '') + (b.poster ? ' [poster "' + b.poster.word + '"]' : '')),
+    })),
+  };
+  try {
+    const r = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: JUDGE_OPTS, system: JUDGE_SYS, prompt: JSON.stringify(input) }),
+    });
+    const j = await r.json();
+    const raw = typeof j.response === 'string' ? j.response : '';
+    const ruling = coerceJudge(parseLoose(raw)); // invalid → null: ruling discarded, the exchange still journaled
+    journalAppend({
+      id: uuid4(), ts: isoTs(), schema_version: JOURNAL_SCHEMA, source: JOURNAL_SOURCE, domain: FICTION_DOMAIN,
+      type: 'judge', day: worldDay, episode: world.episode || '', act: actInfo().roman, phase: actInfo().phase,
+      model: ollamaModel || 'unavailable', model_digest: modelDigest(ollamaModel),
+      decoding: Object.assign({ format: 'json' }, JUDGE_OPTS),
+      input_digest: { prompt_sha256: await sha256Hex(JSON.stringify(input)), graded_entries: today.map(en => en.id), yesterdayArc: input.yesterdayArc },
+      raw_output: raw, raw_output_sha256: await sha256Hex(raw),
+      ruling,
+    });
+    world.judgedDay = worldDay; saveWorld();
+  } catch (e) { judgeCd = 180; /* ollama unreachable — try again later this evening */ }
+  judgeBusy = false;
+}
 
 /* ---------------- the story director (local llm as showrunner) ----------------
    The LLM never draws, codes, or mutates the world directly. Every ~3 min (and
@@ -595,6 +658,9 @@ function updateDirector(dt) {
     beatClock += dt;
     for (let i = beatQueue.length - 1; i >= 0; i--) if (beatClock >= beatQueue[i].at) { executeBeat(beatQueue[i].beat); beatQueue.splice(i, 1); }
   }
+  // §10 — the evening judge: once per day, only after the resolution poster fired
+  if (judgeCd > 0) judgeCd -= dt;
+  if (judgeCd <= 0 && !judgeBusy && !directorBusy && !glossBusy && actInfo().i === 3 && world.resolvedDay === worldDay && world.judgedDay !== worldDay) { judgeCd = 30; runJudge(); }
   processGloss();
 }
 /* news glosses: one director call per headline, cached in the save — "explain
