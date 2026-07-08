@@ -307,18 +307,28 @@ function applyResearch(found) {
 /* optional local storyteller: if Ollama is running on this machine, it writes
    the reactions. if not, personality templates do. zero setup either way. */
 let storyteller = 'templates', ollamaModel = null;
+const modelDigests = {}; // model tag -> ollama blob digest, for journal provenance (§10)
+function modelDigest(name) { return (name && modelDigests[name]) || 'unavailable'; }
 function paramB(name) { const m = String(name).match(/(\d+(?:\.\d+)?)b\b/i); return m ? parseFloat(m[1]) : 0; } // parameter count in billions, from the tag
 async function tryOllama() {
   try {
     const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) });
     if (!r.ok) return;
     const j = await r.json();
-    const names = (j.models || []).map(m => m && m.name).filter(Boolean);
-    if (!names.length) return;
+    const models = (j.models || []).filter(m => m && m.name);
+    if (!models.length) return;
+    models.forEach(m => { if (m.digest) modelDigests[m.name] = m.digest; });
+    const names = models.map(m => m.name);
     // §6 storyteller quality: prefer the largest installed model for better prose
     // (7b/8b over the 3b floor). picks up qwen2.5:7b automatically when it's added.
     names.sort((a, b) => paramB(b) - paramB(a));
-    ollamaModel = names[0];
+    // §10 A/B directors: ?director=<model> overrides the largest-model preference so
+    // identical world-days can be replayed under different directors and their
+    // journals compared (the per-entry model field is what makes them comparable).
+    // unknown or absent name → normal preference, nothing breaks.
+    const want = typeof location !== 'undefined' && location.search ? new URLSearchParams(location.search).get('director') : null;
+    const override = want ? (names.find(n => n === want) || names.find(n => n.split(':')[0] === want) || names.find(n => n.startsWith(want))) : null;
+    ollamaModel = override || names[0];
     storyteller = 'ollama · ' + ollamaModel.split(':')[0]; renderFeed();
   } catch (e) { }
 }
@@ -334,6 +344,65 @@ async function storytellerLine(e, item) {
     const line = (j.response || '').trim().split('\n')[0].replace(/["']/g, '').toLowerCase().slice(0, 56);
     if (line) say(e, line, 0, e.color === INK ? MUT : e.color);
   } catch (e2) { }
+}
+
+/* ---------------- §10 tier 1: the journal (the evidence stream) ----------------
+   Every director exchange becomes one entry in a localStorage ring buffer
+   (cap 200) — a tap on the side of the aquarium, not the reason the fish exist.
+   The law, stated here and in every export: this is evidence about the FICTION
+   layer of the terrarium; it makes no claims about the real companies or
+   systems. Append-only: corrections are new entries, never retroactive edits;
+   evicting the oldest is the only deletion. Schema per the §10 rulings
+   amendment (Continuum's consumer intake contract): id, tz-aware ts,
+   schema_version + source, model tag AND digest (or the literal "unavailable"),
+   decoding settings, episode/act/beat ids, input_digest, raw_output + sha256,
+   and a fiction-domain marker on every entry. Ollama absent → no exchanges,
+   no entries, nothing rendered. */
+const JOURNAL_KEY = 'ct_journal_v1', JOURNAL_CAP = 200, JOURNAL_SCHEMA = 1;
+const JOURNAL_SOURCE = { system: 'continuum-arcade', version: '2.0' };
+const FICTION_DOMAIN = 'fiction/terrarium-canon'; // the mandatory marker: terrarium canon, never real-world claims
+const JOURNAL_LAW = 'this journal is evidence about the fiction layer of the continuum terrarium. it makes no claims about the real companies or systems.';
+let journal = [];
+try { const _j = JSON.parse(localStorage.getItem(JOURNAL_KEY) || 'null'); if (Array.isArray(_j)) journal = _j.slice(-JOURNAL_CAP); } catch (e) { }
+function saveJournal() { try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal)); } catch (e) { } }
+function journalAppend(entry) { journal.push(entry); if (journal.length > JOURNAL_CAP) journal = journal.slice(-JOURNAL_CAP); saveJournal(); }
+function uuid4() {
+  try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) { }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+}
+function isoTs(d = new Date()) { // ISO-8601 with the local utc offset — the consumer contract requires a timezone
+  const p = n => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset(), sn = off < 0 ? '-' : '+', ao = Math.abs(off);
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + sn + p(Math.floor(ao / 60)) + ':' + p(ao % 60);
+}
+async function sha256Hex(s) { // integrity hash; no crypto.subtle (file://) → the literal "unavailable", never guessed
+  try { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join(''); } catch (e) { return 'unavailable'; }
+}
+/* one entry per director exchange — written whether or not the output validated
+   (a discarded tick is evidence too). beat ids are stamped onto the kept beat
+   objects themselves so tier 2 attribution can reference them later. */
+async function journalDirector(state, opts, raw, parsed, ok) {
+  const id = uuid4();
+  const kept = ok ? ok.beats : [];
+  kept.forEach((b, i) => { b.beat_id = id.slice(0, 8) + '-b' + (i + 1); });
+  const rawBeats = parsed && Array.isArray(parsed.beats) ? parsed.beats.length : 0;
+  journalAppend({
+    id, ts: isoTs(), schema_version: JOURNAL_SCHEMA, source: JOURNAL_SOURCE, domain: FICTION_DOMAIN,
+    type: 'director', day: worldDay, episode: world.episode || '', act: state.act, phase: state.phase,
+    model: ollamaModel || 'unavailable', model_digest: modelDigest(ollamaModel),
+    decoding: Object.assign({ format: 'json' }, opts),
+    input_digest: {
+      prompt_sha256: await sha256Hex(JSON.stringify(state)),
+      day: state.day, act: state.act, newDay: state.newDay, episode: state.episode, stage: state.stage,
+      arc: state.arc, news: state.news.length, interventions: state.interventions.length,
+      strongest: state.strongestHeadline ? state.strongestHeadline.id + '::' + state.strongestHeadline.title : '',
+    },
+    raw_output: raw, raw_output_sha256: await sha256Hex(raw),
+    beats_kept: kept.map(b => ({ beat_id: b.beat_id, who: b.who, do: b.do, to: b.to, line: b.line, poster: b.poster ? { kicker: b.poster.kicker, word: b.poster.word, sub: b.poster.sub } : null })),
+    beats_dropped: Math.max(0, rawBeats - kept.length),
+    callback: state.newDay ? { expected: state.callbackTo, first_line: kept.length ? kept[0].line : null } : null,
+    judge: null, // reserved: the evening judge appends its own entry (append-only — this one is never edited)
+  });
 }
 
 /* ---------------- the story director (local llm as showrunner) ----------------
@@ -498,17 +567,23 @@ function applyDirectorResult(ok) {
   beatQueue = beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / (beats.length || 1)) })); beatClock = 0;
   interventions = []; // cleared after each successful director tick
 }
+const DIRECTOR_OPTS = { temperature: .85, num_predict: 800 }; // hoisted so the journal records exactly what was sent
 async function runDirector() {
   if (directorBusy || !ollamaModel) return;
   directorBusy = true;
+  const state = buildDirectorState();
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: { temperature: .85, num_predict: 800 }, system: DIRECTOR_SYS, prompt: JSON.stringify(buildDirectorState()) }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: DIRECTOR_OPTS, system: DIRECTOR_SYS, prompt: JSON.stringify(state) }),
     });
     const j = await r.json();
-    applyDirectorResult(coerceDirector(parseLoose(j.response)));
-  } catch (e) { /* offline or unreadable: discard silently, template life continues */ }
+    const raw = typeof j.response === 'string' ? j.response : '';
+    const parsed = parseLoose(raw);
+    const ok = coerceDirector(parsed);
+    applyDirectorResult(ok);
+    journalDirector(state, DIRECTOR_OPTS, raw, parsed, ok).catch(() => { }); // §10 — a journal failure never blocks the show
+  } catch (e) { /* offline or unreadable: discard silently, template life continues; a failed fetch is no exchange, so no journal entry */ }
   directorBusy = false;
   directorCd = 175 + Math.random() * 30; // next tick in ~3 min
 }
