@@ -82,7 +82,9 @@ const WIRE = [
   { id: 'openai', kind: 'statuspage', url: 'https://status.openai.com/api/v2/summary.json' },
   { id: 'claude', kind: 'statuspage', url: 'https://status.claude.com/api/v2/summary.json' },
   { id: 'gemini', kind: 'gcp', url: 'https://status.cloud.google.com/incidents.json' },
-  { id: 'grok', kind: 'statuspage', url: 'https://status.x.ai/api/v2/summary.json' },
+  // x.ai's JSON api is bot-walled, but their rss feed is open AND sends CORS —
+  // bill found it (jul 8). the browser reads it directly; the relay is a fallback.
+  { id: 'grok', kind: 'feed', url: 'https://status.x.ai/feed.xml' },
   { id: 'mistral', kind: 'statuspage', url: 'https://status.mistral.ai/api/v2/summary.json' },
   { id: 'perplexity', kind: 'statuspage', url: 'https://status.perplexity.com/api/v2/summary.json' },
   { id: 'cohere', kind: 'statuspage', url: 'https://status.cohere.com/api/v2/summary.json' },
@@ -110,12 +112,31 @@ function applyStatuspage(m, j, via) {
   wire[m.id] = { word, tone, headline: inc ? String(inc.name).toLowerCase() : null, incidents: (j.incidents || []).slice(0, 3).map(i => ({ name: i.name, url: i.shortlink || STATUS_PAGES[m.id] })), via };
 }
 async function tryRelay(m) { // direct fetch failed — try the local server's allowlisted relay
-  if (m.kind !== 'statuspage' || !relayAllowed(m.url)) return false;
+  if (!relayAllowed(m.url)) return false;
   try {
     const r = await fetch('/relay?u=' + encodeURIComponent(m.url), { cache: 'no-store' });
     if (!r.ok) return false;
-    applyStatuspage(m, await r.json(), 'via local relay'); wireOk = true; return true;
+    if (m.kind === 'feed') applyFeed(m, await r.text(), 'via local relay');
+    else if (m.kind === 'statuspage') applyStatuspage(m, await r.json(), 'via local relay');
+    else return false;
+    wireOk = true; return true;
   } catch (e) { return false; }
+}
+/* an rss status feed (x.ai): items are incidents; anything not "Status: RESOLVED"
+   is open. severity words pick the tone; no open items = running clean. */
+function applyFeed(m, xmlText, via) {
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+  if (doc.querySelector('parsererror')) throw new Error('unreadable feed');
+  const items = Array.from(doc.querySelectorAll('item')).slice(0, 12).map(it => ({
+    title: ((it.querySelector('title') || {}).textContent || 'incident').trim(),
+    link: ((it.querySelector('link') || {}).textContent || '').trim() || STATUS_PAGES[m.id],
+    desc: (it.querySelector('description') || {}).textContent || '',
+  }));
+  const open = items.filter(i => !/status:\s*resolved/i.test(i.desc));
+  const red = open.some(i => /severity:\s*(critical|major|outage|down)/i.test(i.desc));
+  wire[m.id] = open.length
+    ? { word: red ? 'down hard' : 'a bit wobbly', tone: red ? 'red' : 'amber', headline: open[0].title.toLowerCase().slice(0, 90), incidents: open.slice(0, 3).map(i => ({ name: i.title, url: i.link })), via }
+    : { word: 'running clean', tone: 'green', headline: null, incidents: [], via };
 }
 async function fetchWire(m) {
   try {
@@ -134,9 +155,19 @@ async function fetchWire(m) {
     if (!(await tryRelay(m))) wire[m.id] = { word: 'human page only', tone: 'gray', headline: null, incidents: [] }; // no relay → honest fallback
   }
 }
+async function fetchFeedWire(m) { // rss status feed: read directly (x.ai sends CORS), relay as fallback
+  try {
+    const r = await fetch(m.url, { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    applyFeed(m, await r.text(), 'via status feed');
+    wireOk = true;
+  } catch (e) {
+    if (!(await tryRelay(m))) wire[m.id] = { word: 'human page only', tone: 'gray', headline: null, incidents: [] };
+  }
+}
 async function checkStatus() {
   const before = {}; WIRE.forEach(m => before[m.id] = wire[m.id].tone);
-  await Promise.allSettled(WIRE.map(fetchWire));
+  await Promise.allSettled(WIRE.map(m => m.kind === 'feed' ? fetchFeedWire(m) : fetchWire(m)));
   let toneChanged = false;
   WIRE.forEach(m => {
     if (before[m.id] !== wire[m.id].tone) toneChanged = true;
@@ -167,7 +198,7 @@ function showWireDetail(id, refresh) {
   const s = wire[id], n = news[id], e = entities.find(x => x.wireId === id);
   const toneDot = `<i class="dot ${s.tone}" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px"></i>`;
   let h = `${toneDot}<b>${id}</b> — ${s.word}${s.via ? ` <span style="color:#6B6B6B">· ${s.via}</span>` : ''} &nbsp; <a href="${STATUS_PAGES[id]}" target="_blank" rel="noopener">status page <i>↗</i></a><br>`;
-  if (s.tone === 'gray') h += `x.ai and mistral publish status for humans only — no wire a browser reads directly. run the local server (run_local_server.command) for a relay, or use the link above.<br>`;
+  if (s.tone === 'gray') h += `this one publishes status for humans only — no wire a browser can read right now. run the local server (run_local_server.command) for a relay, or use the link above.<br>`;
   if (s.incidents && s.incidents.length) h += 'open incidents: ' + s.incidents.map(i => `<a href="${i.url}" target="_blank" rel="noopener">${i.name.toLowerCase()}</a>`).join(' · ') + '<br>';
   if (n && n.items.length) h += 'on the news wire (48h):<br>' + n.items.map(it => {
     const g = world.glosses[id + '::' + it.title]; enqueueGloss(id, it.title); // linked headline = fact; the gloss below is a generated aid

@@ -14,8 +14,11 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   (`shift+d` tick now, hold `shift+f` 30×) + Fable's review rulings applied
 - v1.2 §7–§9: fear/avoidance + nosy probing Regulator; perplexity = model researcher
   (census already logged deepseek/qwen/kimi); local wire relay in `server.py`
-  (built, secure, currently idle — mistral/x.ai/deepseek expose no readable JSON; honest
-  "human page only" fallback stands). Server now starts via `run_local_server.command` → `server.py`.
+  (built, secure — mistral/deepseek still expose nothing readable; honest "human page
+  only" fallback stands for them). Server starts via `run_local_server.command` → `server.py`.
+  **Jul 8: grok's wire is LIVE** — Bill found `status.x.ai/feed.xml` (rss, open, sends
+  CORS!). Browser reads it directly everywhere, relay is the fallback; "via status feed"
+  shown in the detail panel. First non-gray grok ever.
 - Jul 6 (Fable session): **§10 discussed and RULED** — two-tier Continuum integration,
   rulings appended to DIRECTOR_SPEC.md ("§10 review rulings"). The reasoning project was
   read from source; Fable's external review + rev 1 amendments live in THAT repo
