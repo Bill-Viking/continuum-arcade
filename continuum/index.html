@@ -40,6 +40,21 @@
   #journallinks{display:none;margin-top:12px;font-size:11px;color:var(--faint)}
   #journallinks a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
   #journallinks a:hover{color:var(--ink)}
+  /* §11 — the command line: one quiet Swiss input. the answer card wears amber,
+     perplexity's color — the palette means things here. */
+  .askrow{display:flex;align-items:center;gap:10px;margin-top:14px;max-width:680px}
+  .askmark{color:var(--accent);font-weight:700;font-size:14px}
+  #askline{flex:1;border:1px solid var(--hair);background:var(--paper);color:var(--ink);
+           font:13px Arial,"Helvetica Neue",Helvetica,sans-serif;padding:8px 12px;outline:none;border-radius:0}
+  #askline:focus{border-color:var(--ink)}
+  #askline::placeholder{color:var(--faint)}
+  #askpanel{display:none;margin-top:10px;border:1px solid var(--hair);border-left:2px solid var(--amber);
+            padding:14px 18px;font-size:13px;color:var(--mut);max-width:680px;line-height:1.7}
+  #askpanel b{color:var(--ink)}
+  #askpanel a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #askpanel .gloss{color:var(--faint);font-style:italic}
+  #askpanel .x{float:right;cursor:pointer;color:var(--faint);padding:0 2px}
+  #askpanel .x:hover{color:var(--ink)}
   #about{display:none;border:1px solid var(--hair);padding:16px 20px;margin:12px 0 4px;font-size:13px;color:var(--mut);line-height:1.75;max-width:860px}
   #about b{color:var(--ink)}
   .sub a{color:var(--ink);font-weight:600;text-decoration:none} .sub a i{color:var(--accent);font-style:normal}
@@ -67,6 +82,8 @@
       <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
     </div>
     <a id="wireline" target="_blank" rel="noopener">wire &nbsp;·&nbsp; tuning…</a>
+    <div class="askrow"><span class="askmark">›</span><input id="askline" type="text" autocomplete="off" spellcheck="false" placeholder="ask the archive anything — perplexity will look it up · read &lt;url&gt; · help" /></div>
+    <div id="askpanel"></div>
     <div id="wiredetail"></div>
     <div id="journallinks">the director's journal — evidence about the fiction layer, nothing more: <a href="#" id="dljournal">download journal</a> · <a href="#" id="dlcontinuum">export for continuum</a></div>
   </footer>
