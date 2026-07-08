@@ -238,3 +238,51 @@ recorded here for coherence: Continuum ingests nothing until its Experiment 03 r
 closed, then starts with a 2–4 week tap-only observation period and weekly consolidation
 caps — so Tier 1 here can ship whenever we like, and no Arcade work sits on Continuum's
 critical path.
+
+## 11. v2.1 — The archive answers: ask + read [Bill, Jul 8 — approved, Fable executing]
+
+The terrarium learns to look things up — as theater performed by perplexity, the researcher
+(canon: librarian → researcher, §8). One quiet Swiss command line in the footer (accent `›`
+mark, hairline input) and one amber-coded answer card (perplexity's color — the meaning-coded
+palette, not decoration). Laws that bound it:
+
+- **The §9 relay stays UNTOUCHED** (§10 ruling 5). Page reading is a SEPARATE endpoint with
+  its own posture.
+- **Injection containment:** fetched web text is quoted material, never instructions. It NEVER
+  enters the director's prompt or DIRECTOR_SYS — research runs as its own Ollama call whose
+  system prompt orders sources treated as quotes. Asks are NOT interventions (the director
+  never hears them) and are NOT journaled (§10 stays director/judge evidence only; expanding
+  the journal needs a new ruling).
+- **Fact/fiction line:** fetched extracts and links render as fact (linked, labeled); the
+  model's composed answer renders as a marked gloss; the filing trip is labeled fiction.
+- Every failure is honest and quiet. All fetched strings HTML-escaped before rendering.
+
+**ask <question>** (bare text = ask): Wikipedia (CORS-open, key-free: `action=query
+list=search` → `rest_v1/page/summary`) + HN Algolia (3 hits) fetched in parallel → linked
+sources = fact; if Ollama is up, a 2–3 sentence lowercase answer composed ONLY from those
+snippets = gloss. No Ollama → sources only, labeled so. Nothing found → say so. Works from
+file:// and GitHub Pages (no server needed).
+
+**read <url>** — local server only: `server.py` gains `GET /read?u=<https-url>`, separate
+from `/relay`: https-only, port 443 only, no userinfo; EVERY resolved address must be
+public/global (loopback, private, link-local, reserved → 403), redirects re-checked hop by
+hop; 15s timeout, 600KB read cap, text/* only; server-side text extraction (stdlib
+HTMLParser, script/style stripped, 20k char cap) returned as JSON. Client renders title +
+link + quoted excerpt as fact, the summary as gloss, "via local reader" shown. No server
+(Pages/file://) → honest "start run_local_server.command" card. Known TOCTOU: the
+public-host check resolves DNS separately from urllib's connect — accepted for a personal
+local tool, documented in code.
+
+**The performance:** submitting sends perplexity to the archive ("a question. on it."); the
+card reveals when she files it (~9s grace if she can't perform — asleep, carried, down —
+the answer never blocks on theater). Filing shelves a real book (`world.books++`, cap
+stands). Narrator while pending: "perplexity is at work on your question." One question in
+flight at a time. `help` lists the commands.
+
+**Engine guards:** global hotkeys (m, shift+d, shift+f) ignore keystrokes originating in
+form fields. Calm law holds — the research walk is one walker, exempt like directives.
+
+**Verification checklist:** ask works with the plain http.server (no /read); read refuses
+http://, localhost, 127.0.0.1, private ranges, and redirects to any of those; /relay
+behavior byte-identical; Ollama off → sources-only cards, zero console errors; typing in
+the command line never mutes the world or forces a director tick.
