@@ -286,3 +286,29 @@ form fields. Calm law holds — the research walk is one walker, exempt like dir
 http://, localhost, 127.0.0.1, private ranges, and redirects to any of those; /relay
 behavior byte-identical; Ollama off → sources-only cards, zero console errors; typing in
 the command line never mutes the world or forces a director tick.
+
+## 12. v2.2 — The world answers back [Bill, Jul 8 evening — "it doesn't engage"; approved, Fable executing]
+
+Bill's verdict after playing: the terrarium performs but never responds — "a bunch of
+characters moving around… boring." Fix the conversation loop, not the pacing law.
+
+- **Talk to residents.** Select a resident; the command line becomes "say something to
+  <id>". Plain text (not ask/read/help) goes to THEM: they stop, listen (idle ~7s,
+  speakCd cleared), and answer in character as ONE deadpan lowercase line (≤12 words,
+  own TALK_SYS call, temp .9, num_predict 40) in a speech bubble — in the world, no new
+  panels. Your words echo as a faint "you: …" bubble at their feet. Asleep → "five more
+  minutes." Down → "…" and mythos passes it on (canon: he keeps company). No Ollama →
+  a personality template line, still alive. Injection/canon law: TALK_SYS pins fiction
+  ("never claim to be the real company"); replies are theater, never facts.
+- **ask gets live data + memory fallback.** Weather-shaped questions (regex, typo-tolerant)
+  → open-meteo geocoding + current conditions (CORS-open, key-free) rendered as FACT with
+  the source linked — no LLM needed, fast. Otherwise wikipedia+hn as §11; when sources
+  don't answer (or none found), RESEARCH_SYS now instructs: answer from memory prefixed
+  exactly "from memory:" — rendered with an explicit warning: the model's memory, not the
+  web, could be stale, verify. The fact/fiction line holds: api data = linked fact,
+  memory = loudly labeled generation.
+- **Repetition kill:** gemini's "charted." poster fires at most once per day
+  (world.flagPosterDay), and her found-something chatter halves. The flags stay.
+- Out of scope, flagged for a direction session: stakes/drama systems (seasons, rivalry
+  scores, regulator verdicts that matter, census visitors, resident projects that
+  complete). "Boring" is only partly a features problem.
