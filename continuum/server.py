@@ -7,6 +7,12 @@ server-side with a browser UA and returns the JSON with ACAO: *. Hard
 allowlist, 15s timeout, no query passthrough beyond `u`. Its posture is
 never loosened (§10 ruling 5) — /read below is a separate door.
 
+GET /search?q=<query>  (§12) real web search via the Brave Search API. Needs
+bill's key in search_key.json (gitignored, {"brave": "<key>"}) — read fresh
+per request, so pasting the key needs no restart. No key file → 404 and the
+terrarium quietly falls back to wikipedia+hn. Query only; nothing else passes
+through.
+
 GET /read?u=<url>   (§11) reads ONE public https page for the terrarium's
 "read <url>" command and returns extracted text as JSON. Its own posture:
 https only, port 443 only, no userinfo; every resolved address must be
@@ -85,7 +91,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.relay()
         if route == '/read':
             return self.read_page()
+        if route == '/search':
+            return self.search()
         return super().do_GET()
+
+    def search(self):
+        try:
+            with open('search_key.json') as f:
+                key = (json.load(f) or {}).get('brave') or ''
+        except Exception:
+            key = ''
+        if not key:
+            return self.deny(404, 'no search key configured (search_key.json)')
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        q = (params.get('q') or [''])[0].strip()
+        if not q or len(q) > 200:
+            return self.deny(400, 'bad query')
+        req = urllib.request.Request(
+            'https://api.search.brave.com/res/v1/web/search?count=5&q=' + urllib.parse.quote(q),
+            headers={'X-Subscription-Token': key, 'Accept': 'application/json', 'User-Agent': UA})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                j = json.loads(resp.read(READ_MAX))
+            results = [{'title': r.get('title', ''), 'url': r.get('url', ''),
+                        'desc': re.sub(r'<[^>]+>', '', r.get('description', ''))}
+                       for r in (j.get('web', {}).get('results') or [])[:5]]
+        except Exception:
+            return self.deny(502, 'search upstream failed')
+        payload = json.dumps({'q': q, 'results': results}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def read_page(self):
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
