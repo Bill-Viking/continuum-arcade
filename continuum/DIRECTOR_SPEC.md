@@ -312,3 +312,53 @@ characters moving around… boring." Fix the conversation loop, not the pacing l
 - Out of scope, flagged for a direction session: stakes/drama systems (seasons, rivalry
   scores, regulator verdicts that matter, census visitors, resident projects that
   complete). "Boring" is only partly a features problem.
+
+### §12 build notes (Fable, Jul 8 night)
+
+Shipped: the anti-loop law (generalized, engine-level — `announce({ambientKey})`, once per
+day per ambient type) and the brave `/search` door (key-gated, fail-soft to wikipedia+hn)
+with the from-memory fallback. DROPPED: the weather special-case (Bill: "a patch, not an
+answer" — general search replaces it). PENDING BILL'S GO: talk-to-residents (spec'd above,
+unbuilt — re-confirm before building).
+
+## 13. v3.0 — The self-evolving terrarium [drafted Jul 8 for Bill's REVIEW — do not build]
+
+Bill's law, stated Jul 8: "gemini finding something repeatedly goes against the whole point
+of the terrarium, which is it's self-evolving, not just constantly looping." Diagnosis: the
+director layer evolves (episodes, arcs) but the ambient layer beneath it is hand-coded slot
+machines, and nothing the director does can permanently change the world. The cage is the
+bottleneck, not the model — fix the setup first, consider a bigger model (qwen3 / 70b-class)
+only after. Five mechanics, buildable in any order after Bill's review:
+
+1. **Relationships (persistent, drifting).** `world.bonds`: pairwise scores -1..1 between
+   residents. New director verbs `bond`/`snub` (validated like the rest, small nudges only,
+   ±0.15/day cap per pair). Engine effects: high bond → meetings linger, gossip clusters
+   prefer each other, celebrate together; low bond → they leave when the other arrives,
+   deadpan sniping lines. Scores decay toward 0 over ~2 weeks so nothing calcifies. The
+   prompt gets the top-3 strongest bonds/grudges — the director writes to them.
+2. **Accretive world (one permanent change per week).** The director earns ONE `found` verb
+   per calendar week: a new small landmark from a FIXED safe palette (garden, signpost,
+   second bench, weather vane, notice board, pond — Swiss line-art, pre-drawn by the
+   engine, never model-invented graphics). Placed in an empty district, persisted in
+   `world.foundations` (cap 6, oldest fades to a marker stone), named in ≤3 lowercase
+   words by the director, enters LANDMARKS + the prompt. Month two looks different from
+   month one — that is the point.
+3. **Chapter memory ("previously on continuum").** Sunday evening, after the judge pass, one
+   extra call compiles the week's arcLog + episodes into ONE line, appended to
+   `world.chapters` (append-only, cap 26 — half a year). All chapters ride every director
+   prompt. Long memory without context blowup; the world can reference "the week the tower
+   stalled".
+4. **Census visitors.** A census lab seen on ≥3 distinct days may visit ONCE: a gray generic
+   mascot (one neutral sprite, engine-drawn) arrives at dawn, wanders, is inspected by the
+   regulator, leaves at dusk; poster `visited.` (ink). At most one visitor/week, only on
+   quiet news days. Real-world-driven newness, zero new art per lab.
+5. **Anti-loop law extension.** Already shipped for posters; extend to speech: a resident may
+   not repeat the same templated line twice in one day (tracked per line hash, engine-side).
+   Director lines exempt (they're generated fresh).
+
+Laws that bind §13: zero-build constraint holds (no sprite generation — palette is
+pre-drawn); every mechanic fail-soft (Ollama absent → bonds/foundations/chapters freeze,
+world runs as today); validate-hard on every new verb; the journal schema gains
+`beats_kept[].verb` coverage for bond/snub/found automatically (same contract); pacing law
+untouched. Model note: if prose quality caps the fun after this ships, trial `qwen3:32b`
+or a 70b at low temp for the director only — the judge stays cheap.
