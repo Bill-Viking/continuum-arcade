@@ -65,6 +65,8 @@ world.chapters = world.chapters || [];       // §13 — "previously on continuu
 world.chapterDay = world.chapterDay || 1;    // §13 — the worldDay the last chapter was compiled
 world.episodeLog = world.episodeLog || [];   // §13 — one record per resolved day (the chapter compiler's source)
 world.bonds = world.bonds || {};             // §13 — pairwise friendship/grudge scores ("a|b" → {v: -1..1, d: last-nudge day})
+world.foundations = world.foundations || []; // §13 — permanent structures the story earned ({id, name, x, y, day})
+world.foundedDay = world.foundedDay || 0;    // §13 — the worldDay of the last founding (one per week, engine-enforced)
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -783,6 +785,7 @@ const DIRECTOR_SYS = [
   'When newDay is false, keep the SAME "episode" and "stage" you were given and move the story FORWARD — never restart or rename it. In act iii (evening) bring the day to a resolution.',
   'You may be given "chapters" — the running history of past weeks ("previously on continuum"). Treat it as canon: build on it, and call back to it when natural.',
   'Verbs "bond" (grow warm) and "snub" (grow cool): for these, "to" MUST be another resident (never a landmark or "the regulator"). Use them sparingly to develop friendships and rivalries across days. You may be given "bonds" — the current strongest relations; honor and develop them, never contradict them without a story reason.',
+  'When given "canFound": true you may include AT MOST ONE beat {"who": id, "do": "found", "to": one id from "foundPalette", "line": "a name of 1-3 lowercase words drawn from the week\'s chapters or arc"} — it PERMANENTLY adds that structure to the world. Found only what the story has earned; most weeks you should not.',
   'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
 ].join(' ');
 
@@ -824,7 +827,9 @@ function buildDirectorState() {
     bonds: topBonds(), // §13 — the strongest current relations
 
     residents: entities.map(e => ({ id: e.id, personality: e.desc, district: districtOf(e.x, e.y), doing: stateWord(e), wire: e.wireId ? (wire[e.wireId] || {}).tone || 'gray' : 'none' })),
-    landmarks: ['tower', 'archive', 'bench', 'vault', 'frontier'],
+    landmarks: Object.keys(LANDMARKS), // §13 — founded structures are real places
+    canFound: canFoundNow(), // §13 — this week's one permanent change is still available
+    foundPalette: Object.keys(FOUND_PALETTE).filter(id => !world.foundations.some(f => f.id === id)),
     news: Object.entries(news).map(([id, n]) => ({ id, title: n.title.slice(0, 90), points: n.points, cls: n.cls })),
     interventions: interventions.slice(-5),
   };
@@ -838,13 +843,21 @@ function coerceDirector(obj) {
   const episode = typeof obj.episode === 'string' ? obj.episode.trim().toLowerCase().replace(/["']/g, '').split(/\s+/).slice(0, 6).join(' ').slice(0, 48) : '';
   let stage = typeof obj.stage === 'string' ? obj.stage.trim().toLowerCase() : '';
   if (stage && !LANDMARKS[stage]) stage = ''; // unknown landmark → no stage, never invent one
-  const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster', 'bond', 'snub'];
+  const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster', 'bond', 'snub', 'found'];
   const TONES = { green: GREENC, amber: AMBER, red: RED, cobalt: COBALT, violet: VIOLET, ink: INK };
   const beats = [];
   for (const b of (Array.isArray(obj.beats) ? obj.beats : [])) {
     if (beats.length >= 6) break;
     if (!b || typeof b !== 'object' || !DO.includes(b.do) || !byId[b.who]) continue;
     if (byId[b.who].visitor) continue; // §13 — visitors are never beat actors
+    if (b.do === 'found') { // §13 — one permanent change per week, engine-gated and validated hard
+      if (!canFoundNow() || beats.some(x => x.do === 'found')) continue;
+      if (typeof b.to !== 'string' || !FOUND_PALETTE[b.to] || world.foundations.some(f => f.id === b.to)) continue;
+      const nm = typeof b.line === 'string' ? b.line.trim().toLowerCase().replace(/["'.]/g, '').split(/\s+/).slice(0, 3).join(' ').slice(0, 24) : '';
+      if (!nm) continue; // a foundation with no name is unusable
+      beats.push({ who: b.who, do: 'found', to: b.to, line: nm, poster: null });
+      continue;
+    }
     let to = b.to; if (to === 'null' || to === '') to = null;
     if (to != null && byId[to] && byId[to].visitor) continue; // …nor targets
     // §13 bond/snub: "to" MUST be another resident — never a landmark, the regulator, or yourself
@@ -887,7 +900,7 @@ function executeBeat(b) {
     // §13 — the director writes relationships: warmth walks over, coolness turns away
     case 'bond': nudgeBond(e.id, b.to, .15); goNear(loc, 40); break;
     case 'snub': nudgeBond(e.id, b.to, -.15); e.dir = (byId[b.to] && byId[b.to].x > e.x) ? -1 : 1; e.state = 'idle'; e.idleT = 4; break;
-  }
+    case 'found': foundStructure(b.to, b.line, e); if (LANDMARKS[b.to]) goNear(LANDMARKS[b.to], 30); return; // the line was the name, not speech
   if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
 }
 /* apply one validated director tick: rotate the arc, name/advance the day's
@@ -1168,6 +1181,86 @@ const FRONTIER = { x: ux(.84), y: 280 };  // gemini's district (no structure, ju
 const LANDMARKS = { tower: { x: TOWER.x, y: TOWER.y + 20 }, archive: ARCHIVE, bench: BENCH, vault: VAULT, frontier: FRONTIER };
 function districtOf(x, y) { let best = 'frontier', bd = 1e9; for (const k in LANDMARKS) { const d = Math.hypot(LANDMARKS[k].x - x, LANDMARKS[k].y - y); if (d < bd) { bd = d; best = k; } } return best; }
 
+/* ---------------- §13: foundations — the world accretes ----------------
+   One permanent structure per week, director-founded from a fixed palette of
+   six pre-drawn Swiss pieces. The ENGINE owns placement and cadence; the
+   director only picks the piece and names it (1–3 lowercase words, steered to
+   draw from the week's chapters). Founded structures join LANDMARKS — wander
+   pool, stage-eligible, districtOf — so they participate instead of becoming
+   wallpaper. The palette exhausts after six; a future season spec rules on
+   renewal (deliberate — see §13 rulings). */
+const FOUND_PALETTE = { garden: 1, signpost: 1, bench2: 1, vane: 1, board: 1, pond: 1 };
+for (const f of world.foundations) LANDMARKS[f.id] = { x: f.x, y: f.y }; // saved foundations rejoin the map at boot
+function canFoundNow() {
+  return worldDay >= (world.foundedDay || 0) + 7 && Object.keys(FOUND_PALETTE).some(id => !world.foundations.some(f => f.id === id));
+}
+function findFoundationSpot() { // max-min-distance over a coarse grid: the emptiest ground wins
+  const taken = Object.values(LANDMARKS).concat(entities.map(e => ({ x: ux(e.home[0]), y: e.home[1] })));
+  let best = { x: W / 2, y: (BAND_TOP + GROUND) / 2 }, bd = -1;
+  for (let gx = M + 70; gx <= W - M - 70; gx += 36) {
+    for (let gy = BAND_TOP + 34; gy <= GROUND - 26; gy += 26) {
+      let d = 1e9;
+      for (const p of taken) d = Math.min(d, Math.hypot(gx - p.x, gy - p.y));
+      if (d > bd) { bd = d; best = { x: gx, y: gy }; }
+    }
+  }
+  return best;
+}
+function foundStructure(pid, name, actor) {
+  if (!FOUND_PALETTE[pid] || world.foundations.some(f => f.id === pid)) return;
+  const spot = findFoundationSpot();
+  world.foundations.push({ id: pid, name, x: Math.round(spot.x), y: Math.round(spot.y), day: worldDay });
+  world.foundedDay = worldDay;
+  LANDMARKS[pid] = { x: Math.round(spot.x), y: Math.round(spot.y) };
+  saveWorld();
+  announce('the ' + name, 'founded.', GREENC, (world.arc || 'the world grows.').slice(0, 70), actor || null, { prio: 2 });
+}
+function drawFoundations() { // six pre-drawn Swiss pieces — hairlines, one meaning-coded accent each
+  const t = performance.now() / 1000;
+  ctx.font = '600 8px ' + FONT;
+  for (const f of world.foundations) {
+    const { x, y } = f;
+    ctx.lineWidth = 1.5; ctx.strokeStyle = FAINT;
+    switch (f.id) {
+      case 'garden':
+        ctx.strokeRect(x - 20, y - 12, 40, 14);
+        ctx.strokeStyle = MUT;
+        for (const [gx, gh] of [[x - 11, 8], [x, 10], [x + 11, 7]]) { ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx - 2, y - gh); ctx.moveTo(gx, y); ctx.lineTo(gx + 2, y - gh + 2); ctx.stroke(); }
+        ctx.fillStyle = GREENC; ctx.fillRect(x - 6, y - 8, 2.5, 2.5); ctx.fillRect(x + 6, y - 10, 2.5, 2.5);
+        break;
+      case 'signpost':
+        ctx.strokeStyle = MUT; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 26); ctx.stroke();
+        ctx.strokeRect(x - 1, y - 24, 16, 6); ctx.strokeRect(x - 15, y - 15, 15, 6);
+        break;
+      case 'bench2':
+        ctx.beginPath(); ctx.moveTo(x - 18, y - 8); ctx.lineTo(x + 18, y - 8);
+        ctx.moveTo(x - 14, y - 8); ctx.lineTo(x - 14, y); ctx.moveTo(x + 14, y - 8); ctx.lineTo(x + 14, y); ctx.stroke();
+        break;
+      case 'vane':
+        ctx.strokeStyle = MUT; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 28); ctx.stroke();
+        ctx.save(); ctx.translate(x, y - 28); ctx.rotate(Math.sin(t * .3) * .9); // the wind actually turns it
+        ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.stroke();
+        ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(4, -2.5); ctx.lineTo(4, 2.5); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        break;
+      case 'board':
+        ctx.strokeRect(x - 14, y - 22, 28, 18);
+        ctx.strokeStyle = HAIR; ctx.beginPath();
+        ctx.moveTo(x - 10, y - 17); ctx.lineTo(x + 10, y - 17); ctx.moveTo(x - 10, y - 13); ctx.lineTo(x + 6, y - 13); ctx.moveTo(x - 10, y - 9); ctx.lineTo(x + 9, y - 9); ctx.stroke();
+        ctx.fillStyle = AMBER; ctx.fillRect(x + 9, y - 21, 2.5, 2.5);
+        break;
+      case 'pond':
+        ctx.beginPath(); ctx.ellipse(x, y - 4, 22, 8, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = HAIR; ctx.beginPath();
+        ctx.ellipse(x, y - 4, 10 + (t * 3 % 8), 4 + (t * 3 % 8) * .35, 0, 0, Math.PI * 2); ctx.stroke();
+        break;
+    }
+    ctx.fillStyle = MUT; ctx.textAlign = 'center';
+    ctx.fillText(f.name.toUpperCase().split('').join(' '), x, y + 14);
+    ctx.textAlign = 'left';
+  }
+}
+
 /* ---------------- behavior ---------------- */
 const WORKPLACE = { builder: TOWER, librarian: ARCHIVE, tinkerer: BENCH, explorer: FRONTIER, fable: VAULT, mythos: VAULT, wildcard: FRONTIER, regulator: { x: ux(.06), y: 240 } };
 function directiveTarget(e) {
@@ -1192,6 +1285,13 @@ function pickTarget(e) {
     e.tx = clamp(stageLm.x + (Math.random() - .5) * 70, M + 24, W - M - 24);
     e.ty = clamp(stageLm.y + (Math.random() - .5) * 42, BAND_TOP, GROUND - 6);
     return;
+  }
+  // §13 — founded places are real places: sometimes a wander goes there
+  if (world.foundations.length && Math.random() < .08 && e.kind !== 'regulator') {
+    const f = world.foundations[Math.floor(Math.random() * world.foundations.length)];
+    e.tx = clamp(f.x + (Math.random() - .5) * 50, M + 24, W - M - 24);
+    e.ty = clamp(f.y + (Math.random() - .5) * 30, BAND_TOP, GROUND - 6);
+    avoidRegulator(e); return;
   }
   // §13 — a real friendship pulls: sometimes a wander goes to the friend instead
   if (Math.random() < .1) {
@@ -1883,6 +1983,8 @@ function drawScene() {
       ctx.fillStyle = GREENC; ctx.beginPath(); ctx.moveTo(fl.x, fl.y - 13); ctx.lineTo(fl.x + 8, fl.y - 10.5); ctx.lineTo(fl.x, fl.y - 8); ctx.closePath(); ctx.fill();
     } else { ctx.globalAlpha = .5; ctx.fillStyle = GREENC; ctx.fillRect(fl.x - 2, fl.y - 2, 4, 4); ctx.globalAlpha = 1; }
   });
+  // §13 — the structures the story earned
+  drawFoundations();
   // sparks you left
   for (const s of sparks) { const a = clamp(1 - s.t / 30, .3, 1); ctx.globalAlpha = a; ctx.fillStyle = ACCENT; const pu = 3; ctx.fillRect(s.x - pu, s.y - pu, pu * 2, pu * 2); ctx.globalAlpha = 1; }
 }
