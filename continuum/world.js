@@ -67,6 +67,9 @@ world.episodeLog = world.episodeLog || [];   // §13 — one record per resolved
 world.bonds = world.bonds || {};             // §13 — pairwise friendship/grudge scores ("a|b" → {v: -1..1, d: last-nudge day})
 world.foundations = world.foundations || []; // §13 — permanent structures the story earned ({id, name, x, y, day})
 world.foundedDay = world.foundedDay || 0;    // §13 — the worldDay of the last founding (one per week, engine-enforced)
+world.visitLog = world.visitLog || {};       // §13 — census lab → worldDay of its last visit
+world.visitorDay = world.visitorDay || 0;    // §13 — the worldDay any visitor last came (one a week, at most)
+world.visitorToday = world.visitorToday || null; // §13 — {lab, day}: today's guest, so a reload doesn't lose them
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -221,7 +224,7 @@ function showWireDetail(id, refresh) {
   else h += 'nothing on the news wire in the last 48 hours.<br>';
   // §8 — the census: the field beyond the seven, logged from real headlines
   const cens = Object.values(world.census || {}).sort((a, b) => (b.days || []).length - (a.days || []).length || b.firstDay - a.firstDay);
-  if (cens.length) h += `<b>the census</b> — models perplexity has logged across the field (fact — real headlines):<br>` + cens.slice(0, 8).map(c => `&nbsp;&nbsp;<a href="${c.url}" target="_blank" rel="noopener">${c.name.toLowerCase()}</a> · first seen day ${c.firstDay}${(c.days || []).length > 1 ? ' · ' + c.days.length + ' days' : ''}`).join('<br>') + '<br>';
+  if (cens.length) h += `<b>the census</b> — models perplexity has logged across the field (fact — real headlines):<br>` + cens.slice(0, 8).map(c => `&nbsp;&nbsp;<a href="${c.url}" target="_blank" rel="noopener">${c.name.toLowerCase()}</a> · first seen day ${c.firstDay}${(c.days || []).length > 1 ? ' · ' + c.days.length + ' days' : ''}${world.visitLog[c.name.toLowerCase()] ? ' · visited day ' + world.visitLog[c.name.toLowerCase()] + ' (fiction)' : ''}`).join('<br>') + '<br>';
   // hard line between fact and theater: everything above is real and linked;
   // the mascot's day is fiction and says so.
   if (e) h += `<span style="color:#C9C9C9">meanwhile, in the terrarium: the ${e.id} mascot is ${stateWord(e)} — fiction. only the linked items above are facts.</span>`;
@@ -785,6 +788,7 @@ const DIRECTOR_SYS = [
   'When newDay is false, keep the SAME "episode" and "stage" you were given and move the story FORWARD — never restart or rename it. In act iii (evening) bring the day to a resolution.',
   'You may be given "chapters" — the running history of past weeks ("previously on continuum"). Treat it as canon: build on it, and call back to it when natural.',
   'Verbs "bond" (grow warm) and "snub" (grow cool): for these, "to" MUST be another resident (never a landmark or "the regulator"). Use them sparingly to develop friendships and rivalries across days. You may be given "bonds" — the current strongest relations; honor and develop them, never contradict them without a story reason.',
+  'A visiting mascot from the census may appear among the residents for one day. You may write lines ABOUT the visitor, but NEVER use a visitor as "who" or "to" in any beat.',
   'When given "canFound": true you may include AT MOST ONE beat {"who": id, "do": "found", "to": one id from "foundPalette", "line": "a name of 1-3 lowercase words drawn from the week\'s chapters or arc"} — it PERMANENTLY adds that structure to the world. Found only what the story has earned; most weeks you should not.',
   'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
 ].join(' ');
@@ -1171,6 +1175,53 @@ function bondWord(e) { // the hover caption's relation tell — legibility law
   return (bestV > 0 ? 'thick with ' : 'frosty with ') + bestId;
 }
 
+/* ---------------- §13: census visitors — the field pays a call ----------------
+   A lab perplexity's census has seen on 3+ distinct days may visit ONCE: a gray
+   guest mascot arrives at dawn, wanders and takes notes, probably gets the full
+   regulator inspection (nerve base .6 — he can smell it), and leaves at dusk
+   under a "visited." poster. At most one visit a week, only on quiet news days,
+   30 days before the same lab returns. Engine-driven end to end; the director
+   sees the visitor in residents and may write lines ABOUT them, but a visitor
+   is never a legal beat actor or target (enforced in coerce). The mascot is
+   fiction; the census headlines under it are real and linked. */
+let visitorChk = 0;
+function updateVisitor() {
+  const v = entities.find(e2 => e2.visitor);
+  const h = hourNow();
+  if (v) { if (h >= 18 || h < 6) departVisitor(v); return; }
+  if (world.visitorToday && world.visitorToday.day === worldDay && h >= 6 && h < 18) { spawnVisitor(world.visitorToday.lab, true); return; } // reload mid-visit
+  if (h < 6 || h >= 10) return;                          // arrivals are a dawn thing
+  if (worldDay <= (world.visitorDay || 0) + 6) return;   // one guest a week, at most
+  const strong = strongestHeadline();
+  if (strong && strong.points >= 100) return;            // busy news day — the story has other work
+  const cand = Object.entries(world.census || {})
+    .filter(([k, c]) => (c.days || []).length >= 3 && worldDay > (world.visitLog[k] || 0) + 30 && !byId[k])
+    .sort((a, b) => (b[1].days || []).length - (a[1].days || []).length)[0];
+  if (cand) spawnVisitor(cand[0], false);
+}
+function spawnVisitor(lab, resume) {
+  if (byId[lab]) return;
+  const v = {
+    id: lab, kind: 'visitor', visitor: true, color: MUT, wireId: null, pace: 34,
+    home: [.03, GROUND - 26], desc: 'visiting from the field. here for the day.',
+    lines: ['just visiting.', 'nice terrarium.', 'taking notes.', 'so this is the archive.'],
+    x: M - 16, y: GROUND - 26, tx: ux(.3), ty: GROUND - 70, state: 'walk',
+    idleT: 3, speakCd: 4, hop: 0, flip: 0, dir: 1, seed: Math.random() * 10,
+    inspectCd: 99, walkDist: 0, medalT: 0, workT: 0, nerve: .6,
+  };
+  entities.push(v); byId[lab] = v;
+  world.visitorToday = { lab, day: worldDay }; world.visitorDay = worldDay; saveWorld();
+  if (!resume) { chronicle('a visitor — the census said ' + lab + ' would come up'); say(v, 'just visiting.', 1.2); }
+}
+function departVisitor(v) {
+  const i = entities.indexOf(v); if (i >= 0) entities.splice(i, 1);
+  delete byId[v.id];
+  world.visitLog[v.id] = worldDay; world.visitorToday = null; saveWorld();
+  const c = (world.census || {})[v.id];
+  announce('the census — ' + v.id, 'visited.', INK,
+    (c && c.days ? 'seen in real headlines ' + c.days.length + ' days. ' : '') + 'the visit itself: fiction.', null);
+}
+
 /* ---------------- landmarks ---------------- */
 const TOWER = { x: ux(.52), y: 300 };     // openai's ever-growing build
 const ARCHIVE = { x: ux(.68), y: 424 };   // perplexity's shelves
@@ -1315,6 +1366,7 @@ function pickTarget(e) {
   else if (e.kind === 'explorer') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
   else if (e.kind === 'librarian') p = r < .5 ? near(ARCHIVE.x, ARCHIVE.y + 14, 40) : near(ARCHIVE.x, ARCHIVE.y, 120);
   else if (e.kind === 'tinkerer') p = near(BENCH.x, BENCH.y, 70);
+  else if (e.kind === 'visitor') p = r < .4 ? near(ARCHIVE.x, ARCHIVE.y, 90) : [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)]; // §13 — guests tour; the archive draws them
   else if (e.kind === 'wildcard') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
   else { e.corner = ((e.corner || 0) + 1) % 4; p = PERIMETER[e.corner]; }
   e.tx = p[0]; e.ty = p[1];
@@ -1473,7 +1525,7 @@ function updateSweep(dt) {
    path but never causes the fear itself. Every resident carries a nervousness
    score (0–1): base by personality, pushed up by a trouble headline about your
    model or by the regulator's attention, relaxing back toward base over ~½ hour. */
-const NERVE_BASE = { fable: .2, mythos: .12, builder: .3, explorer: .28, librarian: .55, tinkerer: .4, wildcard: .06, regulator: 0 };
+const NERVE_BASE = { fable: .2, mythos: .12, builder: .3, explorer: .28, librarian: .55, tinkerer: .4, wildcard: .06, regulator: 0, visitor: .6 }; // §13 — guests are jumpy; the regulator can smell it
 function nerveBase(e) { return NERVE_BASE[e.kind] ?? .25; }
 function updateNerve(e, dt) {
   const base = nerveBase(e);
@@ -1680,6 +1732,7 @@ function update(dt) {
   updateProbe(dt);
   updateDirector(dt);
   updatePosters(dt);
+  visitorChk += dt; if (visitorChk >= 2) { visitorChk = 0; updateVisitor(); } // §13 — guests keep world-time (fast-forward included)
   // dusk and dawn are events too
   const n = isNight();
   if (n !== prevNight) {
@@ -1706,7 +1759,7 @@ function stateWord(e) {
   }
   // idle words are chosen to never collide with status vocabulary —
   // nothing here should be mistakable for a claim about the real service
-  return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying the shelves', tinkerer: 'tinkering at his bench', wildcard: 'plotting', regulator: 'on patrol' }[e.kind] || 'idle';
+  return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying the shelves', tinkerer: 'tinkering at his bench', wildcard: 'plotting', regulator: 'on patrol', visitor: 'taking notes' }[e.kind] || 'idle';
 }
 const bornAt = performance.now();
 const INTRO = [
@@ -1859,6 +1912,16 @@ function drawEntity(e) {
       P(-1, -4.5, 3, 1, PAPER);
       ctx.strokeStyle = FAINT; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(0, -7 * 1, 19, t % (Math.PI * 2), (t % (Math.PI * 2)) + 4.5); ctx.stroke(); ctx.setLineDash([]);
+      medal(e);
+      break;
+    }
+    case 'visitor': { // §13 — the gray guest: a mascot without a color yet
+      legs(e, -3, 1, -2, '#8a8a8a');
+      P(-4, -12, 8, 10, '#8a8a8a');
+      P(-4, -12, 8, 1.2, MUT);                    // a traveler's cap line
+      eyes(e, -3, 1, -10);
+      P(-1, -5, 2, 1, PAPER);
+      P(e.dir > 0 ? 6 : -9, -6, 3, 4, MUT);       // the suitcase
       medal(e);
       break;
     }
@@ -2026,6 +2089,7 @@ function drawCard() {
     ctx.fillStyle = toneColor; ctx.fillRect(cx + 14, cy + 50, 6, 6);
     ctx.fillStyle = MUT; ctx.fillText('wire: ' + s.word, cx + 26, cy + 57);
   } else { ctx.fillStyle = MUT; ctx.fillText('wire: unregulated, ironically', cx + 14, cy + 57); }
+  if (e.visitor) return; // §13 — guests don't take directives; they're just visiting
   // activity directives — the user tells a resident how to spend the next ~10 min
   const active = e.directiveT > 0 ? e.directive : null;
   ctx.font = '11px ' + FONT; ctx.textAlign = 'left';
@@ -2092,7 +2156,7 @@ function onCardButton(raw) { for (const b of cardButtons) if (raw.x >= b.x && ra
 /* the user is a character: pick a resident up, carry them, drop them somewhere.
    drag uses the same inverse-camera map as clicks, so they land where you aim. */
 let dragE = null, downE = null, dragStart = { x: 0, y: 0 }, dragOff = { x: 0, y: 0 }, didDrag = false;
-const DROP_LINE = { fable: 'wheee. again!', mythos: 'you carry me. i remember.', builder: 'i was working.', explorer: 'new vantage point.', librarian: 'my place was marked.', tinkerer: 'careful. fragile.', wildcard: 'do that again.', regulator: 'this is highly irregular.' };
+const DROP_LINE = { fable: 'wheee. again!', mythos: 'you carry me. i remember.', builder: 'i was working.', explorer: 'new vantage point.', librarian: 'my place was marked.', tinkerer: 'careful. fragile.', wildcard: 'do that again.', regulator: 'this is highly irregular.', visitor: 'is this part of the tour?' };
 canvas.addEventListener('mousedown', ev => {
   if (selected && onCardButton(rawPos(ev))) { downE = null; return; } // pressing a card button, not grabbing a resident
   const p = canvasPos(ev); downE = pickEntityAt(p); didDrag = false; dragStart = p;
