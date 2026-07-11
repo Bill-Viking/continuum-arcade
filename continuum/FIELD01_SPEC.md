@@ -91,3 +91,33 @@ Nothing else gets color. That restraint is the pop.
 Build note: all of the above is flat canvas 2D — polygons, alpha, transforms; zero
 dependencies, zero images. If a technique needs a texture, pre-render it once to an
 offscreen canvas at boot (paper grain, the type layer) and blit — never per-frame.
+
+## POST-MORTEM + THE v2 QUESTION (Fable, Jul 11 — after Bill's review)
+
+Bill's review of the elevated pass, verbatim: "the paint is not good — watermarks that
+mean nothing, changed the color of the squares, beep sounds that change tone but don't
+relate to anything." He is right, and the lesson is recorded for every future session:
+**decoration is not meaning. Color-coding nobody can decode is just colored squares.
+Pitch without rhythm is noise. Judge every visual/audio idea by what a first-time player
+FEELS in the moment, not by its design-vocabulary pedigree.**
+
+Reverted: zone tints, the synth pass, the ghost type. Kept (earned in play): slab depth +
+cast shadows, the animated auditor (bank/anticipation/wake/modes/lighthouse/hitstop),
+keyring HUD, carried keys, survey trail, teaching captions (the low rail is finally
+explained IN the game).
+
+**The real diagnosis: the gameplay is 1980 Pac-Man with one ghost.** No escalation, no
+choices, no reason to replay. Boring is a DESIGN problem. A v2 needs a design answer from
+Bill before any session builds again — the question is: what should 30 seconds of field 01
+FEEL like? Candidate directions (pick one, combine, or reject all):
+1. **The heist** — tension/stealth: patrol routes you learn, sight-lines to break,
+   noise you make, near-miss escapes. Slow-fast-slow rhythm.
+2. **The arcade ladder** — escalation: waves/fields that remix the maze, a second
+   auditor, speed and scoring depth, chase intensity that builds until you crack.
+3. **The puzzle run** — routing: limited low-rails, doors and switches, planning the
+   perfect key order; the auditor is a clock, not a hunter.
+4. **The story run** — the vault-run as a playable EPISODE of the terrarium: short,
+   authored beats, mythos talking you through, one perfect five-minute experience
+   rather than a replayable arcade.
+No build until Bill picks the fantasy. Then a fresh session designs mechanics to that
+feeling and rebuilds from the working §mechanics core (movement/BFS/collision are solid).
