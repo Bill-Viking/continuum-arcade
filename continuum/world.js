@@ -48,7 +48,7 @@ const SAVE_KEY = 'ct_world_v1';
 let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3, flags: [], seenNews: [] };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.first) world = s; } catch (e) { }
 world.seenNews = world.seenNews || [];
-world.flags = (world.flags || []).map(f => ({ x: f.x, y: f.y, d: f.d || 1 })).slice(-12);
+world.flags = (world.flags || []).map(f => ({ x: f.x, y: f.y, d: f.d || 1, label: f.label || null })).slice(-12); // §14 — labels are the point now
 world.arc = world.arc || '';                 // the director's current storyline
 world.arcLog = world.arcLog || [];           // last 5 storylines, fed back to the director each tick
 world.glosses = world.glosses || {};         // headline key -> plain-words explanation (cached per headline)
@@ -353,6 +353,21 @@ function applyResearch(found) {
     if (p && p.state !== 'down' && !p.carried && !sleeping(p)) { p.tx = clamp(ARCHIVE.x, M + 24, W - M - 24); p.ty = ARCHIVE.y + 14; p.state = 'walk'; say(p, 'a new one. filing.'); }
   }
 }
+/* ---------------- §14: flags mean things ----------------
+   Random wander-flags are retired. A flag is planted only where something
+   story-real happened — the day's resolution, an audit, a founding, a census
+   discovery, a visitor's departure — and gemini physically walks to the site
+   to plant it (she is the surveyor of record, canon). One pending chart at a
+   time; hover reads the event. The world's field becomes its own annotated
+   timeline instead of decoration. */
+let pendingChart = null;
+function chartEvent(x, y, label) {
+  if (pendingChart) return; // one survey at a time — most days the resolution gets the pin
+  pendingChart = { x: clamp(x, M + 24, W - M - 24), y: clamp(y, BAND_TOP, GROUND - 6), label: String(label).toLowerCase().slice(0, 48), day: worldDay };
+  const g = byId['gemini'];
+  if (g && g.state !== 'down' && !g.carried && !sleeping(g)) { g.tx = pendingChart.x; g.ty = pendingChart.y; g.state = 'walk'; say(g, 'charting this.'); }
+}
+
 /* optional local storyteller: if Ollama is running on this machine, it writes
    the reactions. if not, personality templates do. zero setup either way. */
 let storyteller = 'templates', ollamaModel = null;
@@ -387,7 +402,7 @@ async function storytellerLine(e, item) {
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, options: { num_predict: 20 }, prompt: `You are ${e.id}, a tiny robot (${e.desc}) in a quiet minimalist world. React to this news about you in six lowercase words or fewer, deadpan, no emoji: "${item.title}"` }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, options: { num_predict: 20 }, prompt: `You are ${e.id}, a tiny robot (${e.desc}) in a quiet minimalist world. React to this news about you in six lowercase words or fewer, deadpan, no emoji: "${item.title}"` }),
     });
     const j = await r.json();
     const line = (j.response || '').trim().split('\n')[0].replace(/["']/g, '').toLowerCase().slice(0, 56);
@@ -497,7 +512,7 @@ async function runJudge() {
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: JUDGE_OPTS, system: JUDGE_SYS, prompt: JSON.stringify(input) }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, format: 'json', options: JUDGE_OPTS, system: JUDGE_SYS, prompt: JSON.stringify(input) }),
     });
     const j = await r.json();
     const raw = typeof j.response === 'string' ? j.response : '';
@@ -532,7 +547,7 @@ async function runChapter() {
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, options: CHAPTER_OPTS, system: CHAPTER_SYS, prompt: JSON.stringify(input) }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, options: CHAPTER_OPTS, system: CHAPTER_SYS, prompt: JSON.stringify(input) }),
     });
     const j = await r.json();
     const raw = typeof j.response === 'string' ? j.response : '';
@@ -668,7 +683,7 @@ async function composeAnswer(q, sources) { // the gloss: separate call, separate
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, options: { temperature: .3, num_predict: 220 }, system: RESEARCH_SYS, prompt: JSON.stringify({ question: q, sources: sources.length ? sources : 'none were found — answer from memory' }) }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, options: { temperature: .3, num_predict: 220 }, system: RESEARCH_SYS, prompt: JSON.stringify({ question: q, sources: sources.length ? sources : 'none were found — answer from memory' }) }),
     });
     const j = await r.json();
     return ((j.response || '').trim().replace(/\s+/g, ' ').replace(/^["']+|["']+$/g, '').toLowerCase().slice(0, 600)) || null;
@@ -948,6 +963,9 @@ function applyDirectorResult(ok) {
     world.episodeLog = world.episodeLog || [];
     world.episodeLog.push({ day: worldDay, episode: world.episode, arc: (ok.arc || world.arc || '').slice(0, 100) });
     world.episodeLog = world.episodeLog.slice(-10);
+    // §14 — the day's episode gets a pin at its stage: gemini charts the resolution
+    const stg = world.episodeStage && LANDMARKS[world.episodeStage];
+    chartEvent(stg ? stg.x + 30 : W / 2, stg ? stg.y : (BAND_TOP + GROUND) / 2, 'day ' + worldDay + ' — ' + world.episode);
     const pbIdx = beats.findIndex(b => b.do === 'poster' && b.poster);
     const p = pbIdx >= 0 ? beats[pbIdx].poster : null;
     announce('day ' + worldDay + ' — ' + world.episode,
@@ -967,7 +985,7 @@ async function runDirector() {
   try {
     const r = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: DIRECTOR_OPTS, system: DIRECTOR_SYS, prompt: JSON.stringify(state) }),
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, format: 'json', options: DIRECTOR_OPTS, system: DIRECTOR_SYS, prompt: JSON.stringify(state) }),
     });
     const j = await r.json();
     const raw = typeof j.response === 'string' ? j.response : '';
@@ -1011,7 +1029,7 @@ function processGloss() {
   const g = glossQueue.shift(); glossBusy = true;
   fetch('http://localhost:11434/api/generate', {
     method: 'POST',
-    body: JSON.stringify({ model: ollamaModel, stream: false, options: { temperature: .4, num_predict: 60 }, prompt: `Explain this ai-news headline in ONE plain lowercase sentence for a curious non-expert. No preamble, no quotation marks. Headline: "${g.title}"` }),
+    body: JSON.stringify({ model: ollamaModel, stream: false, think: false, options: { temperature: .4, num_predict: 60 }, prompt: `Explain this ai-news headline in ONE plain lowercase sentence for a curious non-expert. No preamble, no quotation marks. Headline: "${g.title}"` }),
   }).then(r => r.json()).then(j => {
     let s = (j.response || '').trim().split('\n')[0].replace(/^["']+|["']+$/g, '').replace(/\s+/g, ' ').toLowerCase().slice(0, 160);
     if (s) { world.glosses[g.key] = s; saveWorld(); if (detailId) showWireDetail(detailId, true); }
@@ -1223,6 +1241,7 @@ function departVisitor(v) {
   const c = (world.census || {})[v.id];
   announce('the census — ' + v.id, 'visited.', INK,
     (c && c.days ? 'seen in real headlines ' + c.days.length + ' days. ' : '') + 'the visit itself: fiction.', null);
+  chartEvent(v.x, v.y, 'day ' + worldDay + ' — ' + v.id + ' visited'); // §14 — history gets a pin
 }
 
 /* ---------------- landmarks ---------------- */
@@ -1269,6 +1288,7 @@ function foundStructure(pid, name, actor) {
   LANDMARKS[pid] = { x: Math.round(spot.x), y: Math.round(spot.y) };
   saveWorld();
   announce('the ' + name, 'founded.', GREENC, (world.arc || 'the world grows.').slice(0, 70), actor || null, { prio: 2 });
+  chartEvent(spot.x + 30, spot.y, 'day ' + worldDay + ' — the ' + name + ' founded'); // §14 — history gets a pin
 }
 function drawFoundations() { // six pre-drawn Swiss pieces — hairlines, one meaning-coded accent each
   const t = performance.now() / 1000;
@@ -1366,7 +1386,7 @@ function pickTarget(e) {
     else p = near(ux(e.home[0]), e.home[1], 300);
   } else if (e.kind === 'mythos') p = near(ux(e.home[0]), e.home[1], 80);
   else if (e.kind === 'builder') p = r < .55 ? near(TOWER.x, TOWER.y + 26, 46) : near(TOWER.x, TOWER.y + 20, 200);
-  else if (e.kind === 'explorer') p = [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)];
+  else if (e.kind === 'explorer') p = pendingChart ? near(pendingChart.x, pendingChart.y, 10) : [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)]; // §14 — a pending survey outranks wanderlust
   else if (e.kind === 'librarian') p = r < .5 ? near(ARCHIVE.x, ARCHIVE.y + 14, 40) : near(ARCHIVE.x, ARCHIVE.y, 120);
   else if (e.kind === 'tinkerer') p = near(BENCH.x, BENCH.y, 70);
   else if (e.kind === 'visitor') p = r < .4 ? near(ARCHIVE.x, ARCHIVE.y, 90) : [M + 34 + Math.random() * (W - 2 * M - 68), BAND_TOP + Math.random() * (GROUND - BAND_TOP - 12)]; // §13 — guests tour; the archive draws them
@@ -1390,16 +1410,17 @@ function onArrive(e) {
     const d = pendingDiscovery; pendingDiscovery = null;                 // §8 — file the field discovery
     say(e, 'filed.'); sfx.tap();
     announce('the census — ' + d.name.toLowerCase(), 'discovered.', AMBER, d.title.toLowerCase().slice(0, 66) + (d.title.length > 66 ? '…' : ''), e); // the linked headline stays the fact
+    chartEvent(ARCHIVE.x - 44, ARCHIVE.y + 8, 'day ' + worldDay + ' — ' + d.name.toLowerCase() + ' discovered'); // §14 — history gets a pin
   }
   if (e.kind === 'librarian' && Math.hypot(e.x - ARCHIVE.x, e.y - ARCHIVE.y) < 60 && Math.random() < .35 && world.books < 21) {
     world.books++; saveWorld(); say(e, 'filed.'); sfx.tap();
     if (world.books % 3 === 0) announce('the archive — ' + world.books + ' filed', 'catalogued.', AMBER, 'perplexity knows exactly where it is.', e, { ambientKey: 'archive' });
   }
-  if (e.kind === 'explorer' && Math.random() < .4) {
-    world.flags.push({ x: Math.round(e.x), y: Math.round(e.y + 4), d: worldDay });
+  // §14 — gemini plants flags only where history happened; the flag carries the event
+  if (e.kind === 'explorer' && pendingChart && Math.hypot(e.x - pendingChart.x, e.y - pendingChart.y) < 40) {
+    world.flags.push({ x: Math.round(pendingChart.x), y: Math.round(pendingChart.y + 4), d: pendingChart.day, label: pendingChart.label });
     if (world.flags.length > 12) world.flags.shift();
-    saveWorld(); if (Math.random() < .25) maybeSay(e, 'found something.');
-    if (world.flags.length % 4 === 0) announce('the frontier — flag ' + String(world.flags.length).padStart(2, '0'), 'charted.', GREENC, 'gemini has been somewhere new. again.', e, { ambientKey: 'frontier' });
+    pendingChart = null; saveWorld(); say(e, 'charted.'); sfx.tap();
   }
   if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 12, e.y - 8, AMBER, 5, 70, .5); maybeSay(e); }
   if (e.kind === 'wildcard' && Math.random() < .3) e.flip = 1;
@@ -1499,6 +1520,7 @@ function catchTarget(reg, tgt) {
   entities.filter(o => o !== tgt && o.kind !== 'regulator' && !o.visitor && dist(o, tgt) < 150).forEach(o => nudgeBond(o.id, tgt.id, .05)); // §13 — sympathy for the audited
   say(reg, 'audited.', 0); say(tgt, '…', .4);
   announce('the regulator — audit', 'audited.', INK, tgt.id + ' got a full review. fiction — the regulator finally caught up.', tgt, { prio: 2 });
+  chartEvent(tgt.x, tgt.y, 'day ' + worldDay + ' — ' + tgt.id + ' audited'); // §14 — history gets a pin
   endSweep();
 }
 function updateSweep(dt) {
@@ -2133,7 +2155,7 @@ function draw() {
     const fl = world.flags.find(f2 => Math.hypot(mouse.x - f2.x, mouse.y - f2.y + 6) < 12);
     if (fl) {
       ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
-      const cap = 'gemini was here. (day ' + fl.d + ')';
+      const cap = fl.label ? 'gemini charted: ' + fl.label : 'gemini was here. (day ' + fl.d + ')'; // §14 — the flag tells you what happened
       const w2 = ctx.measureText(cap).width;
       ctx.fillStyle = PAPER; ctx.fillRect(fl.x - w2 / 2 - 5, fl.y + 4, w2 + 10, 17);
       ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(fl.x - w2 / 2 - 5, fl.y + 4, w2 + 10, 17);
