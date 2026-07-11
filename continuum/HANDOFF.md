@@ -106,6 +106,9 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
 
 ## Open threads (in priority order)
 
+0. **Two builds queued, fresh sessions:** §15a model broker (DIRECTOR_SPEC §15a) and the
+   field-01 remaster (FIELD01_SPEC.md — visual/feel only, gameplay unchanged). Either order.
+
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
    Judge: nervous residents around the Regulator, probing inspections, census section in a
    wire chip's detail panel, the day's episode line advancing act i → iii, and after an
