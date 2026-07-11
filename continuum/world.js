@@ -646,11 +646,14 @@ async function wikiLookup(q) { // fact source: wikipedia search → page summary
     };
   } catch (e) { return null; }
 }
-async function webSearch(q) { // §12 — real web search via the local /search door (brave, bill's key). absent key/server → null, fall back
+async function webSearch(q) { // §12 — real web search via the local /search door (tavily/brave, bill's key). absent key/server → null, fall back
   try {
     const r = await fetch('/search?q=' + encodeURIComponent(q), { cache: 'no-store' });
     if (!r.ok) return null;
-    return ((await r.json()).results || []).filter(x => x.title && x.url).slice(0, 5);
+    const j = await r.json();
+    const list = (j.results || []).filter(x => x.title && x.url).slice(0, 5);
+    list.provider = j.provider || 'web'; // named in the card — the engine is a fact, not theater
+    return list;
   } catch (e) { return null; }
 }
 async function hnLookup(q) { // fact source: the same wire the news already rides
@@ -727,7 +730,7 @@ function renderAskCard(o) {
   } else if (o.kind === 'pending') {
     h += '<b>the archive — research</b><br>“' + esc(o.q) + '”<br><span class="gloss">perplexity is on it — walking it to the archive…</span>';
   } else if (o.kind === 'answer') {
-    h += '<b>the archive — research</b> <span style="color:#6B6B6B">· filed by perplexity' + (o.web && o.web.length ? ' · web search' : '') + '</span><br>“' + esc(o.q) + '”<br>';
+    h += '<b>the archive — research</b> <span style="color:#6B6B6B">· filed by perplexity, our librarian' + (o.web && o.web.length ? ' · web via ' + esc(o.web.provider || 'search') : '') + '</span><br>“' + esc(o.q) + '”<br>';
     if (o.gloss) {
       h += '<span class="gloss">plain words (ai gloss): ' + esc(o.gloss) + '</span><br>';
       if (/^from memory:/i.test(o.gloss)) h += '<span style="color:#C9C9C9">— that is the model\'s memory, not the web. it can be stale or wrong; verify before trusting it.</span><br>';

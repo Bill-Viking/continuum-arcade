@@ -138,7 +138,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                            for r in (j.get('web', {}).get('results') or [])[:5]]
         except Exception:
             return self.deny(502, 'search upstream failed')
-        payload = json.dumps({'q': q, 'results': results}).encode()
+        payload = json.dumps({'q': q, 'provider': 'tavily' if keys.get('tavily') else 'brave', 'results': results}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
