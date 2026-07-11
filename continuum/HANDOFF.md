@@ -106,8 +106,12 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
 
 ## Open threads (in priority order)
 
-0. **Two builds queued, fresh sessions:** §15a model broker (DIRECTOR_SPEC §15a) and the
-   field-01 remaster (FIELD01_SPEC.md — visual/feel only, gameplay unchanged). Either order.
+0. **§15a model broker is THE queued build** (DIRECTOR_SPEC §15a; needs Bill's Anthropic key
+   + daily budget number). The field-01 remaster SHIPPED Jul 11 (`705d2cb`+`b936c47`, per
+   FIELD01_SPEC.md + its elevated art direction): slab architecture w/ cast shadows, poster
+   type + survey coords + parallax paper, vault breath/key pools/dust/survey trail, the
+   slick auditor (bank/anticipation/wake/3 modes/lighthouse sweep/300ms hitstop), keyring
+   HUD, carried keys, 'the vault run.' title. Shake retired. Gameplay untouched.
 
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
    Judge: nervous residents around the Regulator, probing inspections, census section in a
