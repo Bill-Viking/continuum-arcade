@@ -61,6 +61,9 @@ world.episodeHeadline = world.episodeHeadline || ''; // strongest-headline key t
 world.resolvedDay = world.resolvedDay || 0;  // the worldDay the evening resolution poster fired
 world.census = world.census || {};           // §8 — models perplexity has spotted across the whole field
 world.judgedDay = world.judgedDay || 0;      // §10 — the worldDay the evening judge pass last ran
+world.chapters = world.chapters || [];       // §13 — "previously on continuum": one line per week, kept for half a year
+world.chapterDay = world.chapterDay || 1;    // §13 — the worldDay the last chapter was compiled
+world.episodeLog = world.episodeLog || [];   // §13 — one record per resolved day (the chapter compiler's source)
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -498,6 +501,45 @@ async function runJudge() {
   } catch (e) { judgeCd = 180; /* ollama unreachable — try again later this evening */ }
   judgeBusy = false;
 }
+/* §13 — the season chronicler: every 7th worldDay, after the judge, one call
+   compresses the week's episodeLog into ONE line. chapters are append-only
+   (cap 26 ≈ half a year), ride every director prompt as "previously on
+   continuum", and are journaled with full provenance. missed days fold into
+   the next chapter's span honestly — the world's clock, not the calendar's. */
+const CHAPTER_SYS = 'You are the season chronicler for "Continuum", a quiet fictional terrarium show. You are given the week\'s episode records (day, episode title, closing arc) and the previous chapter. Compress the week into EXACTLY ONE lowercase line of at most 140 characters — name what changed, completed, or began; never what merely happened. It will be read for months as "previously on continuum". Output only the line. No quotes, no preamble.';
+const CHAPTER_OPTS = { temperature: .3, num_predict: 80 };
+let chapterBusy = false, chapterCd = 0;
+async function runChapter() {
+  if (chapterBusy || !ollamaModel) return;
+  chapterBusy = true;
+  const since = world.chapterDay || 1;
+  const eps = (world.episodeLog || []).filter(e2 => e2.day > since);
+  const input = { sinceDay: since, throughDay: worldDay, previousChapter: ((world.chapters || []).slice(-1)[0] || {}).line || '', episodes: eps, currentArc: world.arc || '' };
+  try {
+    const r = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ model: ollamaModel, stream: false, options: CHAPTER_OPTS, system: CHAPTER_SYS, prompt: JSON.stringify(input) }),
+    });
+    const j = await r.json();
+    const raw = typeof j.response === 'string' ? j.response : '';
+    let line = raw.trim().split('\n')[0].replace(/^["']+|["'.]+$/g, '').replace(/\s+/g, ' ').toLowerCase().slice(0, 140);
+    const ok = line.length >= 8 ? line : null; // validate: a real line or discard and retry later
+    journalAppend({
+      id: uuid4(), ts: isoTs(), schema_version: JOURNAL_SCHEMA, source: JOURNAL_SOURCE, domain: FICTION_DOMAIN,
+      type: 'chapter', day: worldDay, episode: world.episode || '', act: actInfo().roman, phase: actInfo().phase,
+      model: ollamaModel || 'unavailable', model_digest: modelDigest(ollamaModel),
+      decoding: Object.assign({}, CHAPTER_OPTS),
+      input_digest: { prompt_sha256: await sha256Hex(JSON.stringify(input)), sinceDay: since, episodes: eps.length },
+      raw_output: raw, raw_output_sha256: await sha256Hex(raw),
+      chapter: ok,
+    });
+    if (ok) {
+      world.chapters = (world.chapters || []).concat({ week: (world.chapters || []).length + 1, throughDay: worldDay, line: ok }).slice(-26);
+      world.chapterDay = worldDay; saveWorld();
+    } else chapterCd = 240;
+  } catch (e) { chapterCd = 240; /* unreachable — try again later */ }
+  chapterBusy = false;
+}
 /* §10 — the journal's two doors (theater-layer footer). "download journal" is
    the raw JSONL evidence stream, header line first. "export for continuum"
    renders the same entries in Continuum's legacy import format — verified
@@ -521,6 +563,10 @@ function journalJsonl() {
    opens with the fiction marker, and none may start with "/" or a shell word —
    continuum quarantines those (classify_legacy_content). */
 function mdDigest(en) {
+  if (en.type === 'chapter') {
+    return '[fiction layer] chapter of the terrarium show, compiled day ' + en.day + ' (model ' + en.model + '): '
+      + (en.chapter ? '"' + en.chapter + '"' : 'the compilation failed validation and was discarded; the raw exchange is preserved in the jsonl journal.');
+  }
   if (en.type === 'judge') {
     const r = en.ruling;
     return '[fiction layer] evening judge for day ' + en.day + ' of the terrarium episode "' + (en.episode || 'untitled') + '" (model ' + en.model + '): '
@@ -546,7 +592,7 @@ function exportContinuumMd() {
   for (const en of journal) {
     out.push('## ' + en.ts.slice(0, 10) + ' ' + en.ts.slice(11, 19));
     out.push('<!-- event_id: ' + en.id + ' -->');
-    out.push((en.type === 'judge' ? 'terrarium-judge' : 'terrarium-director') + ': ' + mdDigest(en));
+    out.push((en.type === 'judge' ? 'terrarium-judge' : en.type === 'chapter' ? 'terrarium-chronicler' : 'terrarium-director') + ': ' + mdDigest(en));
     out.push('');
   }
   return out.join('\n');
@@ -726,6 +772,7 @@ const DIRECTOR_SYS = [
   'Aim for 3 to 4 beats and, when there is news, include one "poster" beat that reacts to a specific headline. Keep every line short. Output only the json.',
   'A day is ONE episode in three acts by local time; you are told "act", "episode", "stage" and "newDay". When newDay is true, NAME the day: set "episode" to a short lowercase title (<=6 words) from the strongest headline, or a quiet theme from the world (the tower, the archive, the trail); set "stage" to the one landmark the day gathers around; and your FIRST beat must call back to yesterday in one line (given as "callbackTo").',
   'When newDay is false, keep the SAME "episode" and "stage" you were given and move the story FORWARD — never restart or rename it. In act iii (evening) bring the day to a resolution.',
+  'You may be given "chapters" — the running history of past weeks ("previously on continuum"). Treat it as canon: build on it, and call back to it when natural.',
   'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
 ].join(' ');
 
@@ -763,6 +810,8 @@ function buildDirectorState() {
     world: { tower: world.tower, books: world.books, flags: world.flags.length },
     arc: world.arc || '',
     recentArcs: (world.arcLog || []).slice(-5),
+    chapters: (world.chapters || []).map(c => 'week ' + c.week + ': ' + c.line), // §13 — the long memory
+
     residents: entities.map(e => ({ id: e.id, personality: e.desc, district: districtOf(e.x, e.y), doing: stateWord(e), wire: e.wireId ? (wire[e.wireId] || {}).tone || 'gray' : 'none' })),
     landmarks: ['tower', 'archive', 'bench', 'vault', 'frontier'],
     news: Object.entries(news).map(([id, n]) => ({ id, title: n.title.slice(0, 90), points: n.points, cls: n.cls })),
@@ -856,6 +905,10 @@ function applyDirectorResult(ok) {
   let beats = ok.beats;
   if (actInfo().i === 3 && world.resolvedDay !== worldDay && world.episode) {
     world.resolvedDay = worldDay;
+    // §13 — the day enters the record: one line per day, the chapter compiler's source
+    world.episodeLog = world.episodeLog || [];
+    world.episodeLog.push({ day: worldDay, episode: world.episode, arc: (ok.arc || world.arc || '').slice(0, 100) });
+    world.episodeLog = world.episodeLog.slice(-10);
     const pbIdx = beats.findIndex(b => b.do === 'poster' && b.poster);
     const p = pbIdx >= 0 ? beats[pbIdx].poster : null;
     announce('day ' + worldDay + ' — ' + world.episode,
@@ -898,6 +951,9 @@ function updateDirector(dt) {
   // §10 — the evening judge: once per day, only after the resolution poster fired
   if (judgeCd > 0) judgeCd -= dt;
   if (judgeCd <= 0 && !judgeBusy && !directorBusy && !glossBusy && actInfo().i === 3 && world.resolvedDay === worldDay && world.judgedDay !== worldDay) { judgeCd = 30; runJudge(); }
+  // §13 — the chronicler: after the judge, when a week of world-days has passed
+  if (chapterCd > 0) chapterCd -= dt;
+  if (chapterCd <= 0 && !chapterBusy && !judgeBusy && !directorBusy && !glossBusy && world.judgedDay === worldDay && worldDay >= (world.chapterDay || 1) + 7) { chapterCd = 30; runChapter(); }
   processGloss();
 }
 /* news glosses: one director call per headline, cached in the save — "explain
@@ -1109,11 +1165,24 @@ function onArrive(e) {
   if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 12, e.y - 8, AMBER, 5, 70, .5); maybeSay(e); }
   if (e.kind === 'wildcard' && Math.random() < .3) e.flip = 1;
 }
+/* §13 speech law — a templated line fires once per day per resident. the pool
+   is retried for a fresh line; all spoken → comfortable silence (stillness law
+   approves). exempt: the regulator (his repetition IS the joke — canon),
+   down/red states (repeated silence is the theme), and director/talk lines
+   (generated fresh, they never pass through here). in-memory by design. */
+const spokenSet = new Set();
+function sayFresh(e, text, delay = 0, color = INK) {
+  if (e.kind === 'regulator' || e.state === 'down' || toneOf(e) === 'red') { say(e, text, delay, color); return true; }
+  const k = e.id + '|' + text;
+  if (spokenSet.has(k)) return false;
+  spokenSet.add(k); say(e, text, delay, color); return true;
+}
 function maybeSay(e, text) {
   if (e.speakCd > 0) return;
   const tn = toneOf(e);
-  const pool = tn === 'green' ? e.lines : (TONE_LINES[tn] || e.lines);
-  say(e, text || pool[Math.floor(Math.random() * pool.length)]);
+  const pool = text ? [text] : (tn === 'green' ? e.lines : (TONE_LINES[tn] || e.lines));
+  const order = [...pool].sort(() => Math.random() - .5);
+  for (const line of order) if (sayFresh(e, line)) break;
   e.speakCd = 14 + Math.random() * 18;
 }
 function celebrate(wireId) {
@@ -1400,8 +1469,8 @@ function updateMeetings(dt) {
     if (a.kind === 'regulator' || b.kind === 'regulator') continue;
     if (a.state === 'idle' && b.state === 'idle' && dist(a, b) < 52) {
       a.dir = b.x > a.x ? 1 : -1; b.dir = -a.dir;
-      say(a, a.lines[Math.floor(Math.random() * a.lines.length)]);
-      say(b, b.lines[Math.floor(Math.random() * b.lines.length)], 1.2);
+      sayFresh(a, a.lines[Math.floor(Math.random() * a.lines.length)]);
+      sayFresh(b, b.lines[Math.floor(Math.random() * b.lines.length)], 1.2);
       meetCd = 15 + Math.random() * 10; return;
     }
   }
