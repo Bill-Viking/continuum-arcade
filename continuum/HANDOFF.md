@@ -79,6 +79,17 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   drops). All fail-soft verified: no Ollama → chapters/founds/judge frozen, bonds still
   move on engine events, zero console errors.
 
+- Jul 11 late: **§14 SHIPPED — flags mean things + qwen3.6 director.** Random wander-flags
+  retired: gemini now charts only real events (resolution/audit/founding/discovery/visitor
+  departure — hover reads the event; legacy flags keep old caption). Director upgraded to
+  **qwen3.6:35b** (newest 32b-class, auto-adopted by largest-wins; qwen2.5:32b kept for
+  ?director= A/B via journal comparison; all ollama calls send think:false — qwen3.x
+  hybrid thinking would eat num_predict). 70b REFUSED: 46GB free disk can't hold 40GB
+  (24GB free after the 23GB pull — watch disk). First qwen3.6 exchange verified live:
+  episode "the lawsuit lands" off the real apple-sues-openai headline, contract held.
+  Search UI disambiguated: 'filed by perplexity (our librarian)' + card says 'web via
+  tavily' (provider reported by /search).
+
 ## Open threads (in priority order)
 
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
