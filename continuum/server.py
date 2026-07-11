@@ -86,6 +86,13 @@ class TextExtract(HTMLParser):
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        # no-cache = always revalidate (304 when unchanged) — otherwise browsers
+        # heuristically serve stale world.js for days after an update
+        if self.path.split('?')[0].endswith(('.js', '.html', '.css')) or self.path.rstrip('/') == '':
+            self.send_header('Cache-Control', 'no-cache')
+        super().end_headers()
+
     def do_GET(self):
         route = urllib.parse.urlparse(self.path).path
         if route == '/relay':
