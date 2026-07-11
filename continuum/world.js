@@ -224,7 +224,7 @@ function showWireDetail(id, refresh) {
   else h += 'nothing on the news wire in the last 48 hours.<br>';
   // §8 — the census: the field beyond the seven, logged from real headlines
   const cens = Object.values(world.census || {}).sort((a, b) => (b.days || []).length - (a.days || []).length || b.firstDay - a.firstDay);
-  if (cens.length) h += `<b>the census</b> — models perplexity has logged across the field (fact — real headlines):<br>` + cens.slice(0, 8).map(c => `&nbsp;&nbsp;<a href="${c.url}" target="_blank" rel="noopener">${c.name.toLowerCase()}</a> · first seen day ${c.firstDay}${(c.days || []).length > 1 ? ' · ' + c.days.length + ' days' : ''}${world.visitLog[c.name.toLowerCase()] ? ' · visited day ' + world.visitLog[c.name.toLowerCase()] + ' (fiction)' : ''}`).join('<br>') + '<br>';
+  if (cens.length) h += `<b>the census</b> — models the librarian has logged across the field (fact — real headlines):<br>` + cens.slice(0, 8).map(c => `&nbsp;&nbsp;<a href="${c.url}" target="_blank" rel="noopener">${c.name.toLowerCase()}</a> · first seen day ${c.firstDay}${(c.days || []).length > 1 ? ' · ' + c.days.length + ' days' : ''}${world.visitLog[c.name.toLowerCase()] ? ' · visited day ' + world.visitLog[c.name.toLowerCase()] + ' (fiction)' : ''}`).join('<br>') + '<br>';
   // hard line between fact and theater: everything above is real and linked;
   // the mascot's day is fiction and says so.
   if (e) h += `<span style="color:#C9C9C9">meanwhile, in the terrarium: the ${e.id} mascot is ${stateWord(e)} — fiction. only the linked items above are facts.</span>`;
@@ -691,7 +691,7 @@ async function composeAnswer(q, sources) { // the gloss: separate call, separate
 }
 async function runAsk(q) {
   if (!q) return;
-  if (pendingAsk) { renderAskCard({ kind: 'note', text: 'one at a time — perplexity is still filing the last one.' }); return; }
+  if (pendingAsk) { renderAskCard({ kind: 'note', text: 'one at a time — the librarian is still filing the last one.' }); return; }
   pendingAsk = { q, t0: performance.now(), arrived: false, results: null };
   renderAskCard({ kind: 'pending', q });
   if (!sendPerplexityToArchive()) pendingAsk.arrived = true; // she's asleep/down/held — the answer never blocks on theater
@@ -707,7 +707,7 @@ async function runAsk(q) {
 }
 async function runRead(url) {
   if (!/^https:\/\//i.test(url)) { renderAskCard({ kind: 'note', text: 'read wants a full https:// address.' }); return; }
-  if (pendingAsk) { renderAskCard({ kind: 'note', text: 'one at a time — perplexity is still filing the last one.' }); return; }
+  if (pendingAsk) { renderAskCard({ kind: 'note', text: 'one at a time — the librarian is still filing the last one.' }); return; }
   pendingAsk = { q: url, t0: performance.now(), arrived: false, results: null };
   renderAskCard({ kind: 'pending', q: url });
   if (!sendPerplexityToArchive()) pendingAsk.arrived = true;
@@ -737,15 +737,15 @@ function renderAskCard(o) {
   let h = close;
   if (o.kind === 'help') {
     h += '<b>the archive — commands</b><br>'
-      + 'ask &lt;question&gt; (or just type it) — perplexity looks it up: wikipedia + the hn wire, real links.<br>'
+      + 'ask &lt;question&gt; (or just type it) — the librarian looks it up: web search + wikipedia + the hn wire, real links.<br>'
       + 'read &lt;url&gt; — she reads one public https page, via the local server.<br>'
       + 'help — this card.';
   } else if (o.kind === 'note') {
     h += esc(o.text);
   } else if (o.kind === 'pending') {
-    h += '<b>the archive — research</b><br>“' + esc(o.q) + '”<br><span class="gloss">perplexity is on it — walking it to the archive…</span>';
+    h += '<b>the archive — research</b><br>“' + esc(o.q) + '”<br><span class="gloss">the librarian is on it — walking it to the archive…</span>';
   } else if (o.kind === 'answer') {
-    h += '<b>the archive — research</b> <span style="color:#6B6B6B">· filed by perplexity, our librarian' + (o.web && o.web.length ? ' · web via ' + esc(o.web.provider || 'search') : '') + '</span><br>“' + esc(o.q) + '”<br>';
+    h += '<b>the archive — research</b> <span style="color:#6B6B6B">· filed by the librarian' + (o.web && o.web.length ? ' · web via ' + esc(o.web.provider || 'search') : '') + '</span><br>“' + esc(o.q) + '”<br>';
     if (o.gloss) {
       h += '<span class="gloss">plain words (ai gloss): ' + esc(o.gloss) + '</span><br>';
       if (/^from memory:/i.test(o.gloss)) h += '<span style="color:#C9C9C9">— that is the model\'s memory, not the web. it can be stale or wrong; verify before trusting it.</span><br>';
@@ -1797,7 +1797,7 @@ function narratorText() {
   // the first half-minute introduces the world to whoever just walked in
   if (performance.now() - bornAt < 34000) return INTRO[Math.floor((performance.now() - bornAt) / 8500) % INTRO.length];
   if (regSweep.active) return 'the regulator is doing a sweep. everyone act normal.';
-  if (pendingAsk) return 'perplexity is at work on your question.'; // §11 — the world acknowledges you
+  if (pendingAsk) return 'the librarian is at work on your question.'; // §11 — the world acknowledges you
   const downE = entities.find(e => e.state === 'down');
   if (downE) return downE.id + ' is down. mythos is keeping company.';
   const items = [];
