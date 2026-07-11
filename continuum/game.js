@@ -64,8 +64,62 @@ let wireOk = false;
 /* ---------------- juice state ---------------- */
 let hiscore = 0; try { hiscore = +(localStorage.getItem('gb_hiscore') || 0) || 0; } catch (e) { }
 let particles = [], popups = [], trail = [];
-let shake = 0, hitStop = 0, flash = 0, flashColor = INK;
+let shake = 0, hitStop = 0, flash = 0, flashColor = INK; // shake is retired (FIELD01_SPEC: no screen-shake, ever) — assignments stay harmless
 let beatT = 0, sirenT = 0;
+
+/* ---------------- remaster: light, paper, depth (FIELD01_SPEC) ----------------
+   One light source, upper-left. Walls are extruded slabs casting flat sharp
+   shadows. The deep background is poster-scale type and paper grain,
+   pre-rendered once and drifting a breath against fable's motion. Dust rides
+   the light; the vault breathes violet; keys sit in amber pools; fable leaves
+   a 30s survey-dot trail. Soft light is a material — glow-as-decoration stays
+   banned. */
+let bgLayer = null, mazeShadow = null;
+let motes = [], crumbs = [], wakeT = 0, prevPX = 0, prevPY = 0;
+for (let i = 0; i < 12; i++) motes.push({ x: Math.random() * W, y: Math.random() * H, ph: Math.random() * 7 });
+function buildLayers() {
+  bgLayer = document.createElement('canvas'); bgLayer.width = W; bgLayer.height = H;
+  const b = bgLayer.getContext('2d');
+  for (let i = 0; i < 900; i++) { b.globalAlpha = .015 + Math.random() * .02; b.fillStyle = INK; b.fillRect(Math.random() * W, Math.random() * H, 1, 1); } // paper grain
+  b.globalAlpha = .033; b.fillStyle = INK; // poster-scale type, cropped and ghosted
+  b.font = 'bold 300px ' + FONT; b.fillText('01', W - 310, H - 48);
+  b.font = 'bold 110px ' + FONT; b.fillText('field', -16, 128);
+  b.globalAlpha = .55; b.fillStyle = FAINT; b.font = '600 8px ' + FONT; b.textAlign = 'center'; // survey coordinates — the map gemini would draw
+  for (let c = 0; c < COLS; c += 2) b.fillText(String.fromCharCode(97 + c), OX + c * TILE + TILE / 2, OY - 24);
+  b.textAlign = 'right';
+  for (let r = 0; r < ROWS; r += 2) b.fillText(String(r + 1).padStart(2, '0'), OX - 12, OY + r * TILE + TILE / 2 + 3);
+  b.globalAlpha = 1; b.textAlign = 'left';
+  // cast shadows: one union fill, flat and sharp — architecture, not blur
+  mazeShadow = document.createElement('canvas'); mazeShadow.width = W; mazeShadow.height = H;
+  const s = mazeShadow.getContext('2d');
+  const SL = 7;
+  s.fillStyle = INK; s.globalAlpha = .055; s.beginPath();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isWall(c, r)) {
+    const x = OX + c * TILE + 2, y = OY + r * TILE + 2, w = TILE - 4, h = TILE - 4;
+    s.moveTo(x + w, y); s.lineTo(x + w + SL, y + SL); s.lineTo(x + w + SL, y + h + SL);
+    s.lineTo(x + SL, y + h + SL); s.lineTo(x, y + h); s.lineTo(x + w, y + h); s.closePath();
+  }
+  s.fill(); s.globalAlpha = 1;
+}
+function drawAtmosphere() {
+  const t = performance.now() / 1000;
+  const v = center(10, 9); // the vault breathes — 4s period, felt more than seen
+  const br = .05 + .03 * Math.sin(t * Math.PI / 2);
+  let g = ctx.createRadialGradient(v.x, v.y, 8, v.x, v.y, 84);
+  g.addColorStop(0, 'rgba(124,58,237,' + br.toFixed(3) + ')'); g.addColorStop(1, 'rgba(124,58,237,0)');
+  ctx.fillStyle = g; ctx.fillRect(v.x - 84, v.y - 84, 168, 168);
+  for (const k of keysToCollect) if (k.on) { // keys sit in pools of amber light
+    const p = center(k.c, k.r);
+    g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 26);
+    g.addColorStop(0, 'rgba(232,155,12,.10)'); g.addColorStop(1, 'rgba(232,155,12,0)');
+    ctx.fillStyle = g; ctx.fillRect(p.x - 26, p.y - 26, 52, 52);
+  }
+  ctx.fillStyle = INK; // dust rides the light direction
+  for (const mo of motes) { ctx.globalAlpha = .035 + .02 * Math.sin(mo.ph + t); ctx.fillRect(mo.x, mo.y, 1.5, 1.5); }
+  ctx.globalAlpha = 1;
+  for (const cr of crumbs) { ctx.globalAlpha = Math.max(0, 1 - cr.t / 30) * .22; ctx.fillStyle = ACCENT; ctx.fillRect(cr.x - 1, cr.y - 1, 2.5, 2.5); } // the survey trail
+  ctx.globalAlpha = 1;
+}
 
 /* ---------------- words ---------------- */
 const FIELD_LINES = [
@@ -109,6 +163,21 @@ function updateJuice(dt) {
   for (const s of trail) s.t += dt; trail = trail.filter(s => s.t < .28);
   if (shake > 0) shake = Math.max(0, shake - 44 * dt);
   if (flash > 0) flash = Math.max(0, flash - 2.2 * dt);
+  // remaster: atmosphere + the auditor's body language
+  for (const mo of motes) { mo.x += 4 * dt; mo.y += 7 * dt; if (mo.y > H) { mo.y = -4; mo.x = Math.random() * W; } if (mo.x > W) mo.x = 0; }
+  for (const cr of crumbs) cr.t += dt; crumbs = crumbs.filter(c2 => c2.t < 30);
+  if (regulator) {
+    regulator.alertT = Math.max(0, (regulator.alertT || 0) - dt);
+    regulator.antT = Math.max(0, (regulator.antT || 0) - dt);
+    regulator.wake = regulator.wake || [];
+    for (const wk of regulator.wake) wk.t += dt;
+    regulator.wake = regulator.wake.filter(w2 => w2.t < .35);
+    if (gameState === 'play' && (regulator.vx || regulator.vy)) { wakeT -= dt; if (wakeT <= 0) { wakeT = .06; regulator.wake.push({ x: regulator.x, y: regulator.y, t: 0 }); } }
+    const hunt = powerTimer <= 0 && gameState === 'play' && (lockdownActive() || (player && dist(player, regulator) < 190));
+    if (hunt && !regulator.wasHunt) { regulator.alertT = .45; sfx.siren(); } // the "!" beat: he's seen you
+    regulator.wasHunt = hunt;
+    regulator.leanA = (regulator.leanA || 0) + ((regulator.vx || 0) * .11 - (regulator.leanA || 0)) * Math.min(1, dt * 7); // banks into turns
+  }
 }
 function drawParticles() {
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
@@ -254,7 +323,13 @@ function movePlayer(dt) {
     else assist(0, ay, sp, dt);
     autoCenter('x', sp, dt);
   }
-  if (ax || ay) trail.push({ x: player.x, y: player.y, t: 0 });
+  if (ax || ay) {
+    trail.push({ x: player.x, y: player.y, t: 0 });
+    // the survey trail: a dot every ~22px of ground covered, fading over 30s
+    if (!crumbs.length || Math.hypot(player.x - crumbs[crumbs.length - 1].x, player.y - crumbs[crumbs.length - 1].y) > 22) { crumbs.push({ x: player.x, y: player.y, t: 0 }); crumbs = crumbs.slice(-200); }
+    // dust on direction changes
+    if (player.dir.x !== prevPX || player.dir.y !== prevPY) { burst(player.x, player.y + 7, FAINT, 2, 40, .3, 2); prevPX = player.dir.x; prevPY = player.dir.y; }
+  }
 }
 // Cornering assist: if you're pushing into a wall but the corridor you want
 // is open and you're just a few pixels off-center, slide you toward center
@@ -361,10 +436,10 @@ function draw() {
   ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   if (showStatus) { drawStatusPanel(); return; }
-  ctx.save();
-  if (shake > 0) ctx.translate((Math.random() - .5) * shake * .6, (Math.random() - .5) * shake * .6);
+  // the deep paper layer drifts a breath against fable's motion (parallax; no screen-shake, ever)
+  if (bgLayer) ctx.drawImage(bgLayer, player ? (player.x - W / 2) * -.012 : 0, player ? (player.y - H / 2) * -.012 : 0);
+  drawAtmosphere();
   drawFrame(); drawMaze(); drawObjects(); drawParticles();
-  ctx.restore();
   if (gameState === 'title') drawTitle();
   if (gameState === 'ready') drawReady();
   if (gameState === 'dying') drawDying();
@@ -453,13 +528,17 @@ function drawFrame() {
 function drawMaze() {
   const lock = lockdownActive();
   if (powerTimer > 0) ctx.globalAlpha = .3; // LOW RAIL: walls fade to a suggestion — you can pass through
+  if (mazeShadow) ctx.drawImage(mazeShadow, 0, 0); // the architecture casts first
   ctx.lineWidth = 1;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isWall(c, r)) {
     const x = OX + c * TILE, y = OY + r * TILE;
     // proximity reveal: the field sharpens around Fable — alive where he is, quiet elsewhere
     const d = Math.hypot(x + TILE / 2 - player.x, y + TILE / 2 - player.y);
     const lvl = d < 90 ? 3 : d < 160 ? 2 : d < 240 ? 1 : 0;
+    // extruded slab: lit top-left face, shaded bottom-right — a model, not a grid
     ctx.fillStyle = WALL_FILL; ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    ctx.fillStyle = '#fbfaf6'; ctx.fillRect(x + 2, y + 2, TILE - 4, 3); ctx.fillRect(x + 2, y + 2, 3, TILE - 4);
+    ctx.fillStyle = lock ? '#ecd9b2' : '#dcd9d2'; ctx.fillRect(x + 2, y + TILE - 5, TILE - 4, 3); ctx.fillRect(x + TILE - 5, y + 2, 3, TILE - 4);
     ctx.strokeStyle = lock ? AMBER : WALL_EDGES[lvl]; // LOCKDOWN reads amber: risk
     ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5);
   }
@@ -805,4 +884,4 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => keys[e.key] = false);
 
 function loop(ts) { let dt = Math.min(.033, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
-reset(); renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000); requestAnimationFrame(loop);
+reset(); buildLayers(); renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000); requestAnimationFrame(loop);
