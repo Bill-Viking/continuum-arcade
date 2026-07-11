@@ -81,9 +81,7 @@ function buildLayers() {
   bgLayer = document.createElement('canvas'); bgLayer.width = W; bgLayer.height = H;
   const b = bgLayer.getContext('2d');
   for (let i = 0; i < 900; i++) { b.globalAlpha = .015 + Math.random() * .02; b.fillStyle = INK; b.fillRect(Math.random() * W, Math.random() * H, 1, 1); } // paper grain
-  b.globalAlpha = .033; b.fillStyle = INK; // poster-scale type, cropped and ghosted
-  b.font = 'bold 300px ' + FONT; b.fillText('01', W - 310, H - 48);
-  b.font = 'bold 110px ' + FONT; b.fillText('field', -16, 128);
+  // (the poster-type watermark is gone — Bill's ruling: it meant nothing to a player)
   b.globalAlpha = .55; b.fillStyle = FAINT; b.font = '600 8px ' + FONT; b.textAlign = 'center'; // survey coordinates — the map gemini would draw
   for (let c = 0; c < COLS; c += 2) b.fillText(String.fromCharCode(97 + c), OX + c * TILE + TILE / 2, OY - 24);
   b.textAlign = 'right';
