@@ -64,6 +64,21 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   evidence instrument; the assistant lane is a dead end. The §10 round-trip with Continuum
   is the test that decides it. Don't pitch new features until that lands.
 
+- Jul 11: **v3.0 §13 SHIPPED — the self-evolving terrarium** (rulings + 5 mechanics,
+  commits `36b6faa..eeff66a`, Fable in-session per Bill's override). Chapter memory
+  (weekly one-line "previously on continuum", cap 26, journaled type:'chapter', exports as
+  terrarium-chronicler, rides every prompt — verified with real qwen2.5:32b); bonds
+  (pairwise -1..1, director bond/snub verbs + engine nudges, ±.15/day cap, fable–mythos
+  pinned canon, hover-caption tells, 3-week decay); foundations (6-piece palette, one
+  found/week engine-gated, director names 1-3 words, max-min-distance placement, joins
+  LANDMARKS/stages — "the quiet pond" verified live); census visitors (dawn→dusk gray
+  guest, never a beat actor/target, quiet-day + weekly gates, reload-safe — kimi verified
+  end-to-end incl. two zero-means-never guard fixes); speech law (templated lines once/day,
+  regulator exempt — canon). Server now sends Cache-Control: no-cache and index.html
+  loads world.js?v=13 (browsers were serving week-stale code — bump ?v= on future big
+  drops). All fail-soft verified: no Ollama → chapters/founds/judge frozen, bonds still
+  move on engine events, zero console errors.
+
 ## Open threads (in priority order)
 
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
