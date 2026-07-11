@@ -362,3 +362,40 @@ world runs as today); validate-hard on every new verb; the journal schema gains
 `beats_kept[].verb` coverage for bond/snub/found automatically (same contract); pacing law
 untouched. Model note: if prose quality caps the fun after this ships, trial `qwen3:32b`
 or a 70b at low temp for the director only — the judge stays cheap.
+
+## §13 review rulings (Bill + Fable walkthrough, Jul 11) — approved as amended, Fable builds in-session
+
+Bill overrode the fresh-Opus handoff: Fable executes §13 in the same session, all five
+mechanics, in this order (dependency-ranked): chapters → bonds → foundations → visitors,
+speech law riding with the first commit. Amendments adopted during the walkthrough:
+
+1. **Chapters:** trigger on every 7th worldDay at the judge pass (world clock, not
+   calendar-Sunday); span = days since the last chapter (missed days fold in honestly).
+   New per-day `world.episodeLog` (day, episode, closing arc — cap 10) is the compile
+   source. Each chapter is journaled as its own entry (`type:"chapter"`, full provenance);
+   export role `terrarium-chronicler`. Chapters (cap 26) ride every director prompt.
+2. **Bonds:** legibility is a requirement, not a nicety — hover caption carries the
+   strongest relation, top-3 bonds ride the prompt, friends visibly linger on meeting.
+   Engine events also nudge bonds (celebrate together, gossip, photobomb solidarity,
+   audit sympathy) so bonds live even with Ollama off. Decay only after ~3 weeks
+   unreinforced (boot-time pass). fable–mythos pinned at 1.0, immutable, canon. The
+   regulator and visitors are excluded from the bond graph.
+3. **Foundations:** cadence = one per 7 worldDays, engine-enforced; engine owns placement
+   (max-min-distance grid); director only names (1–3 lowercase words via the beat's line,
+   steered to draw from the week's chapters). Foundations join LANDMARKS (wander pool,
+   stage-eligible, districtOf). Palette of six exhausts after six founds — deliberate;
+   a future season spec rules on renewal. Poster `founded.` green, prio 2 (rare + real).
+4. **Visitors:** engine-driven lifecycle (dawn arrive, dusk depart, `visited.` ink poster
+   at departure), prompt-visible but NEVER a legal beat who/to (enforced in coerce).
+   Eligibility: census lab seen ≥3 distinct days, ≥7 days since any visit, ≥30 days since
+   THAT lab visited, quiet news day (<100 pts strongest). Gray guest sprite, nerve base .6
+   (the regulator can smell it — inspection likely). Survives mid-day reload.
+5. **Speech law:** a templated line fires once per day per resident (in-memory hash;
+   pool retries for a fresh line, else silence). Exempt: director/talk lines (generated),
+   down/red-state lines (silence-as-theme), and THE REGULATOR entirely — his repetition
+   is the joke (canon: "still files reports. nobody reads them.").
+
+Model ruling: build on qwen2.5:32b; if chapter compression reads mushy, A/B `qwen3` via
+the §10 `?director=` door and compare journals. Verification per house pattern: osascript
+parse, live-browser drive on Bill's running server, fail-soft checks (Ollama absent →
+chapters/founds freeze, bonds move on engine events only, visitors still visit).
