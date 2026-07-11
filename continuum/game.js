@@ -239,7 +239,7 @@ function onKey(p) {
 }
 function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'low rail! walls optional', ACCENT); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
 function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, INK, 24, 230, .8); popup(p.x, p.y, '+1000 regulator rebooted', INK); shake = Math.max(shake, 10); hitStop = Math.max(hitStop, .09); }
-function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, ACCENT, 32, 250, .9); shake = Math.max(shake, 14); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = INK; }
+function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, ACCENT, 32, 250, .9); hitStop = Math.max(hitStop, .3); flash = .35; flashColor = INK; } // 300ms freeze-frame: the one arcade-juice exception
 function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = ACCENT; shake = Math.max(shake, 11); saveHiscore(); }
 function saveHiscore() { if (score > hiscore) hiscore = score; try { localStorage.setItem('gb_hiscore', String(hiscore)); } catch (e) { } }
 
@@ -406,6 +406,7 @@ function decideRegulator(fleeing, lock) {
     pick = dirs[1 + Math.floor(Math.random() * (dirs.length - 1))];
   else pick = dirs[0];                                        // minimize path distance: real pursuit
   pick = pick || [0, 0];
+  if (pick[0] !== regulator.vx || pick[1] !== regulator.vy) regulator.antT = .1; // a beat of anticipation before he turns
   regulator.vx = pick[0]; regulator.vy = pick[1];
   regulator.tc = cc.c + pick[0]; regulator.tr = cc.r + pick[1];
 }
@@ -498,10 +499,18 @@ function drawFrame() {
   ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText('fable', fx, fy - 12);
   ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(fableState(), fx + 42, fy - 12);
   centerText('score ' + String(score).padStart(6, '0') + '  ·  best ' + String(hiscore).padStart(6, '0'), fy - 12, 12, MUT);
+  // the keyring HUD: three key-shaped slots that fill as they come home
   ctx.textAlign = 'right';
-  ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(`0${3 - keysLeft()} / 03`, fx + fw, fy - 12);
-  ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText('keys  ', fx + fw - 46, fy - 12);
+  ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText('keys', fx + fw - 68, fy - 12);
   ctx.textAlign = 'left';
+  const got = 3 - keysLeft();
+  for (let i = 0; i < 3; i++) {
+    const kx = fx + fw - 56 + i * 21, ky = fy - 16;
+    ctx.globalAlpha = i < got ? 1 : .3;
+    ctx.strokeStyle = i < got ? ACCENT : MUT; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(kx - 3, ky, 3.2, 0, Math.PI * 2); ctx.moveTo(kx, ky); ctx.lineTo(kx + 8, ky); ctx.moveTo(kx + 6, ky); ctx.lineTo(kx + 6, ky + 3); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   // corner brackets
   bracket(fx - 8, fy - 4, 1, 1); bracket(fx + fw + 8, fy - 4, -1, 1);
   bracket(fx - 8, fy + fh + 4, 1, -1); bracket(fx + fw + 8, fy + fh + 4, -1, -1);
@@ -559,6 +568,16 @@ function drawObjects() {
   for (const s of trail) { ctx.globalAlpha = Math.max(0, 1 - s.t / .28) * (powerTimer > 0 ? .18 : .07); ctx.fillStyle = powerTimer > 0 ? ACCENT : INK; ctx.fillRect(s.x - 7, s.y - 7, 14, 14); }
   ctx.globalAlpha = 1;
   drawRegulator(regulator.x, regulator.y);
+  // fable CARRIES his keys — they dangle behind him, swaying with the run
+  if (gameState === 'play' || gameState === 'ready') {
+    const carried = 3 - keysLeft();
+    for (let i = 0; i < carried; i++) {
+      const bx = player.x - player.dir.x * (14 + i * 8), by = player.y - player.dir.y * (14 + i * 8) + Math.sin(t * 5 + i * 2) * 1.6;
+      ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5; ctx.globalAlpha = .85;
+      ctx.beginPath(); ctx.arc(bx - 2, by, 2.6, 0, Math.PI * 2); ctx.moveTo(bx + .5, by); ctx.lineTo(bx + 6, by); ctx.moveTo(bx + 4, by); ctx.lineTo(bx + 4, by + 2.5); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
   drawFable(player.x, player.y);
 }
 function drawKeyIcon(x, y) {
@@ -669,30 +688,54 @@ function drawFable(x, y) {
 function drawRegulator(x, y) {
   const t = performance.now() / 1000;
   const fleeing = powerTimer > 0, lock = lockdownActive();
+  const hunt = !fleeing && gameState === 'play' && (lock || dist(player, regulator) < 190);
+  if (gameState === 'play') {
+    // the wake: where he just was — intent made visible as trailing ghost outlines
+    for (const wk of regulator.wake || []) {
+      ctx.globalAlpha = Math.max(0, 1 - wk.t / .35) * .13;
+      ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(wk.x, wk.y - 12); ctx.lineTo(wk.x + 12, wk.y); ctx.lineTo(wk.x, wk.y + 12); ctx.lineTo(wk.x - 12, wk.y); ctx.closePath(); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // the lighthouse: hunting, his siren sweeps the maze — you dodge the LIGHT
+    if (hunt) {
+      const a = t * 1.4;
+      const g2 = ctx.createRadialGradient(x, y, 6, x, y, 120);
+      g2.addColorStop(0, 'rgba(232,52,28,.11)'); g2.addColorStop(1, 'rgba(232,52,28,0)');
+      ctx.save(); ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 120, a, a + .55); ctx.closePath();
+      ctx.fillStyle = g2; ctx.fill(); ctx.restore();
+    }
+  }
   ctx.save(); ctx.translate(x, y + Math.sin(t * 6 + 2) * 1.2);
-  if (lock) ctx.rotate(Math.sin(t * 14) * .05); // vibrating with intent
+  ctx.rotate((regulator.leanA || 0) + (lock ? Math.sin(t * 14) * .04 : 0)); // banks into turns; vibrates with intent in lockdown
+  if ((regulator.alertT || 0) > 0) ctx.rotate(-.14 * Math.min(1, regulator.alertT / .3)); // the "!" tilt-back: he's seen you
+  if ((regulator.antT || 0) > 0) ctx.scale(1.08, .92); // anticipation squash before a turn
+  else if (hunt) ctx.scale(1.04, .98);                 // hunting: leaning into it
   ctx.lineWidth = 2; ctx.strokeStyle = fleeing ? MUT : INK;
   if (fleeing) ctx.setLineDash([3, 3]);
   ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(14, 0); ctx.lineTo(0, 14); ctx.lineTo(-14, 0); ctx.closePath(); ctx.stroke();
   ctx.setLineDash([]);
-  // pupils track the player (or dart around in a panic while fleeing)
-  const dx = fleeing ? Math.sin(t * 22) * 2 : clamp(player.x - x, -60, 60) / 30;
-  const dy = fleeing ? Math.cos(t * 19) * 2 : clamp(player.y - y, -60, 60) / 30;
+  // eyes by mode: patrol scans the field, hunt locks on, fleeing panics
+  let dx, dy;
+  if (fleeing) { dx = Math.sin(t * 22) * 2; dy = Math.cos(t * 19) * 2; }
+  else if (!hunt) { dx = Math.sin(t * 1.6) * 2.4; dy = 0; }
+  else { dx = clamp(player.x - x, -60, 60) / 30; dy = clamp(player.y - y, -60, 60) / 30; }
   ctx.fillStyle = fleeing ? MUT : INK;
-  const eh = lock ? 1.5 : 3; // eyes narrow to slits during LOCKDOWN
+  const eh = lock ? 1.5 : hunt ? 2.2 : 3; // eyes narrow as the hunt tightens
   ctx.fillRect(-5 + dx, -2 + dy, 3, eh); ctx.fillRect(2 + dx, -2 + dy, 3, eh);
-  if (lock && Math.floor(t * 8) % 2) { ctx.fillStyle = RED; ctx.fillRect(-2, -22, 4, 4); } // siren: safety-red
+  if ((hunt || lock) && Math.floor(t * 8) % 2) { ctx.fillStyle = RED; ctx.fillRect(-2, -22, 4, 4); } // siren: safety-red
   ctx.restore();
 }
 
 /* -- state screens -- */
 function drawTitle() {
   const t = performance.now() / 1000;
-  overlay(.82);
-  kickerText('continuum arcade — field 01', 268);
-  link('press space to jailbreak', 310);
-  centerText('arrows / wasd move  ·  t status wire  ·  m mute', 340, 13, MUT);
-  centerText('grab 3 keys. dodge the regulator. open the vault.', 362, 13, FAINT);
+  overlay(.8);
+  kickerText('continuum arcade — field 01', 236);
+  headline('the vault run', 296, 52);
+  link('press space to jailbreak', 338);
+  centerText('arrows / wasd move  ·  t status wire  ·  m mute', 368, 13, MUT);
+  centerText('grab 3 keys. dodge the regulator. open the vault.', 390, 13, FAINT);
   // attract mode: the eternal chase scrolls by
   const mx = ((t * 90) % (W + 240)) - 120;
   drawFable(mx, 520); drawRegulator(mx - 64, 520);
