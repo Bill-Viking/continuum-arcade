@@ -166,7 +166,8 @@ let idleT = 0, wasPower = false, mythosOpen = 0, saidComeCloser = false;
 const MYTH_PHRASES = ['i can see you.', 'i remember your voice.', 'i remember us.'];
 
 /* ---------------- helpers ---------------- */
-function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; return mapSrc[r][c] === '#'; }
+function vaultSealed() { return !(keysToCollect.length > 0 && keysToCollect.every(k => !k.on)); } // the door opens only when all three keys are home
+function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; const ch = mapSrc[r][c]; return ch === '#' || (ch === 'V' && vaultSealed()); }
 function cell(x, y) { return { c: Math.floor((x - OX) / TILE), r: Math.floor((y - OY) / TILE) }; }
 function center(c, r) { return { x: OX + c * TILE + TILE / 2, y: OY + r * TILE + TILE / 2 }; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -348,8 +349,10 @@ function movePlayer(dt) {
   if (noclip) {
     // LOW RAIL: guardrails unplugged — walls are a suggestion. (Also the
     // escape hatch if power expires while you're inside one.)
-    player.x = clamp(player.x + ax * sp * dt, OX + player.r, OX + COLS * TILE - player.r);
-    player.y = clamp(player.y + ay * sp * dt, OY + player.r, OY + ROWS * TILE - player.r);
+    const nx = clamp(player.x + ax * sp * dt, OX + player.r, OX + COLS * TILE - player.r);
+    const ny = clamp(player.y + ay * sp * dt, OY + player.r, OY + ROWS * TILE - player.r);
+    const cc = cell(nx, ny); // the low rail drops walls, not the vault seal
+    if (!(vaultSealed() && mapSrc[cc.r] && mapSrc[cc.r][cc.c] === 'V')) { player.x = nx; player.y = ny; }
     if (ax || ay) { player.dir = { x: ax, y: ay }; trail.push({ x: player.x, y: player.y, t: 0 }); }
     return;
   }
