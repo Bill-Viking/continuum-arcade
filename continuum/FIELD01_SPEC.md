@@ -121,3 +121,41 @@ FEEL like? Candidate directions (pick one, combine, or reject all):
    rather than a replayable arcade.
 No build until Bill picks the fantasy. Then a fresh session designs mechanics to that
 feeling and rebuilds from the working §mechanics core (movement/BFS/collision are solid).
+
+## v2 DIRECTION RULED (Bill, Jul 11): field 01 × the world — the game is a playable episode
+
+Bill: "tie part of the game back into the terrarium to provide a story to the game that
+fits with the live action happening in terrarium." This supersedes the four candidate
+fantasies: field 01 becomes the playable retelling of the founding story, wrapped in
+TODAY's live episode — and the run's outcome flows back into the world's story. The
+channel is zero-infrastructure: same origin, shared localStorage.
+
+### The contract (frozen — both sides build against exactly this)
+- GAME READS `ct_world_v1` (the terrarium save, parse in try/catch): uses `episode`,
+  `episodeDay`, `arc`, `chapters` (last entry's `.line`), `first` (to compute
+  worldDay = floor((Date.now()-first)/864e5)+1). Absent/malformed → game behaves exactly
+  as today (fail-soft law).
+- GAME WRITES `ct_field01_v1` at every run end (win, game over): JSON
+  `{v:1, day:<worldDay>, ts:Date.now(), won:bool, keys:0-3, score, timeSec, deaths}`.
+  Keep the day's BEST run (won beats keys beats score) — read existing, compare, write.
+- WORLD READS `ct_field01_v1` at boot + every 60s (poll; storage events don't fire
+  same-tab): if `day === worldDay` and `ts > (world.field01AckTs||0)` → acknowledge ONCE:
+  set world.field01AckTs = ts, then (a) narrator pool line ("someone ran field 01 today —
+  three keys, the vault opened." / "...the regulator won."), (b) one chronicle line,
+  (c) playbillAdd({a: act, who:'', do:'field01', line: won?'the vault run — won':'the
+  vault run — the regulator won'}) with beatSentence support, (d) buildDirectorState
+  gains `field01: {won, keys, score}` (today only, else omit), (e) DIRECTOR_SYS appended:
+  'You may be given "field01" — someone played the arcade retelling of the founding
+  story today. You may reference it in at most ONE line when natural ("the old story got
+  re-run today"); it is theater about theater, never a fact.' NO poster (rare-by-law).
+- GAME STORY INJECTION (all gated on a fresh save being present):
+  - Title kicker: 'tonight\'s episode — "<episode>"' when episodeDay is today, else
+    current static kicker.
+  - FIELD_LINES: prepend up to 3 live lines (episode line, arc line, latest chapter as
+    'previously on continuum: …'), keep the teaching lines. Built once at boot.
+  - Win sequence: after 'you remembered me.', mythos quotes the day — '"<arc>" — that was
+    today, out there.' and the latest chapter line if present. Fallback: exactly today's
+    static sequence.
+- LAWS: no gameplay changes; no sound changes (post-mortem stands); every read/write in
+  try/catch; file:// or missing save → byte-identical behavior; voice stays lowercase
+  deadpan; nothing here renders as fact.
