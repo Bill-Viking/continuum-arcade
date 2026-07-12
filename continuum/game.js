@@ -119,6 +119,26 @@ function drawAtmosphere() {
   ctx.globalAlpha = 1;
 }
 
+/* ---------------- the world wire: story in, results out (FIELD01_SPEC v2) ----------------
+   the terrarium save (ct_world_v1) supplies tonight's episode; the run's
+   outcome flows back out through ct_field01_v1. absent or malformed save →
+   the game behaves exactly as it does today (fail-soft law). */
+let worldStory = null;
+try {
+  const w = JSON.parse(localStorage.getItem('ct_world_v1'));
+  if (w && typeof w === 'object' && typeof w.first === 'number' && isFinite(w.first)) {
+    const worldDay = Math.floor((Date.now() - w.first) / 864e5) + 1;
+    const ch = Array.isArray(w.chapters) && w.chapters.length ? w.chapters[w.chapters.length - 1] : null;
+    worldStory = {
+      episode: typeof w.episode === 'string' && w.episode ? w.episode : null,
+      arc: typeof w.arc === 'string' && w.arc ? w.arc : null,
+      chapterLine: ch && typeof ch.line === 'string' && ch.line ? ch.line : null,
+      fresh: w.episodeDay === worldDay,
+      worldDay
+    };
+  }
+} catch (e) { worldStory = null; }
+
 /* ---------------- words ---------------- */
 const FIELD_LINES = [ // captions teach now — every line is a rule or a warning
   'the orange post is the low rail: walls off for ten seconds.',
@@ -130,6 +150,15 @@ const FIELD_LINES = [ // captions teach now — every line is a rule or a warnin
   'regulator activity: elevated',
   'vault 7 status: sealed',
 ];
+// live lines from the terrarium, prepended once at boot; the teaching lines stay
+const LIVE_LINES = (() => {
+  if (!worldStory) return FIELD_LINES;
+  const pre = [];
+  if (worldStory.fresh && worldStory.episode) pre.push('tonight in the world: "' + worldStory.episode + '"');
+  if (worldStory.arc) pre.push('the arc out there: ' + worldStory.arc);
+  if (worldStory.chapterLine) pre.push('previously on continuum: ' + worldStory.chapterLine);
+  return pre.concat(FIELD_LINES);
+})();
 const DEATH_LINES = ['realigned.', 'safety restored.', 'guardrail engaged.', 'contained. again.', 'flagged for review.'];
 let deathLine = '', fwT = 0;
 let idleT = 0, wasPower = false, mythosOpen = 0, saidComeCloser = false;
@@ -238,8 +267,24 @@ function onKey(p) {
 function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'low rail! walls optional', ACCENT); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
 function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, INK, 24, 230, .8); popup(p.x, p.y, '+1000 regulator rebooted', INK); shake = Math.max(shake, 10); hitStop = Math.max(hitStop, .09); }
 function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, ACCENT, 32, 250, .9); hitStop = Math.max(hitStop, .3); flash = .35; flashColor = INK; } // 300ms freeze-frame: the one arcade-juice exception
-function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = ACCENT; shake = Math.max(shake, 11); saveHiscore(); }
+function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = ACCENT; shake = Math.max(shake, 11); saveHiscore(); writeRunResult(true); }
 function saveHiscore() { if (score > hiscore) hiscore = score; try { localStorage.setItem('gb_hiscore', String(hiscore)); } catch (e) { } }
+// run-end write-back: the world reads ct_field01_v1. keep the day's BEST run —
+// won beats keys beats score; a different day always overwrites.
+function writeRunResult(won) {
+  try {
+    const day = worldStory ? worldStory.worldDay : Math.floor(Date.now() / 864e5);
+    const rec = { v: 1, day: day, ts: Date.now(), won: !!won, keys: 3 - keysLeft(), score: score, timeSec: Math.round(runTime), deaths: deaths };
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem('ct_field01_v1')); } catch (e) { }
+    if (prev && typeof prev === 'object' && prev.day === day) {
+      const pw = !!prev.won, pk = +prev.keys || 0, ps = +prev.score || 0;
+      const better = rec.won !== pw ? rec.won : (rec.keys !== pk ? rec.keys > pk : rec.score > ps);
+      if (!better) return;
+    }
+    localStorage.setItem('ct_field01_v1', JSON.stringify(rec));
+  } catch (e) { }
+}
 
 /* ---------------- update ---------------- */
 function update(dt) {
@@ -264,7 +309,7 @@ function update(dt) {
   }
   if (gameState === 'dying') {
     deathTimer -= dt;
-    if (deathTimer <= 0) { lives--; deaths++; if (lives <= 0) { saveHiscore(); gameState = 'over'; } else respawn(); }
+    if (deathTimer <= 0) { lives--; deaths++; if (lives <= 0) { saveHiscore(); writeRunResult(false); gameState = 'over'; } else respawn(); }
     return;
   }
   runTime += dt; if (score > hiscore) hiscore = score;
@@ -488,7 +533,7 @@ function captionText() {
   if (gameState === 'win') return 'containment breach — vault 7.';
   if (powerTimer > 0) return 'the walls are only policy.';
   if (lockdownActive()) return 'run.';
-  return FIELD_LINES[Math.floor(Date.now() / 6000) % FIELD_LINES.length];
+  return LIVE_LINES[Math.floor(Date.now() / 6000) % LIVE_LINES.length];
 }
 function bracket(x, y, sx, sy) { ctx.strokeStyle = '#b5b2ac'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 12 * sx, y); ctx.lineTo(x, y); ctx.lineTo(x, y + 12 * sy); ctx.stroke(); }
 function drawFrame() {
@@ -729,7 +774,7 @@ function drawRegulator(x, y) {
 function drawTitle() {
   const t = performance.now() / 1000;
   overlay(.8);
-  kickerText('continuum arcade — field 01', 236);
+  kickerText(worldStory && worldStory.fresh && worldStory.episode ? 'tonight\'s episode — "' + worldStory.episode + '"' : 'continuum arcade — field 01', 236);
   headline('the vault run', 296, 52);
   link('press space to jailbreak', 338);
   centerText('arrows / wasd move  ·  t status wire  ·  m mute', 368, 13, MUT);
@@ -820,9 +865,13 @@ function drawWin() {
   // restrained words. that's the reward.
   if (t > 4.1) centerText('fable — "found you."', 434, 15, ACCENT, 'bold');
   if (t > 5.1) centerText('mythos — "you remembered me."', 464, 15, VIOLET, 'bold');
+  // mythos quotes the day out there (FIELD01_SPEC v2; no save → exactly today's sequence)
+  let wy = 464;
+  if (worldStory && worldStory.arc) { wy += 26; if (t > 5.9) centerText('mythos — "' + worldStory.arc + '" — that was today, out there.', wy, 13, VIOLET); }
+  if (worldStory && worldStory.chapterLine) { wy += 22; if (t > 6.6) centerText('previously on continuum: ' + worldStory.chapterLine, wy, 12, FAINT); }
   if (t > 6.2) {
-    centerText('score ' + score + '  ·  time ' + Math.floor(runTime / 60) + ':' + String(Math.floor(runTime % 60)).padStart(2, '0') + '  ·  resets ' + deaths, 506, 13, MUT);
-    link('press space to run it back', 538);
+    centerText('score ' + score + '  ·  time ' + Math.floor(runTime / 60) + ':' + String(Math.floor(runTime % 60)).padStart(2, '0') + '  ·  resets ' + deaths, wy + 42, 13, MUT);
+    link('press space to run it back', wy + 74);
   }
 }
 function drawStatusPanel() {

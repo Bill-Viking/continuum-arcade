@@ -71,6 +71,7 @@ world.visitLog = world.visitLog || {};       // §13 — census lab → worldDay
 world.visitorDay = world.visitorDay || 0;    // §13 — the worldDay any visitor last came (one a week, at most)
 world.visitorToday = world.visitorToday || null; // §13 — {lab, day}: today's guest, so a reload doesn't lose them
 world.playbill = world.playbill || [];       // §15b — the day's performed beats, readable at any moment (cap 40, reset each day)
+world.field01AckTs = world.field01AckTs || 0; // field 01 × the world — ts of the last acknowledged game run (announce once)
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -810,6 +811,7 @@ const DIRECTOR_SYS = [
   'A visiting mascot from the census may appear among the residents for one day. You may write lines ABOUT the visitor, but NEVER use a visitor as "who" or "to" in any beat.',
   'When given "canFound": true you may include AT MOST ONE beat {"who": id, "do": "found", "to": one id from "foundPalette", "line": "a name of 1-3 lowercase words drawn from the week\'s chapters or arc"} — it PERMANENTLY adds that structure to the world. Found only what the story has earned; most weeks you should not.',
   'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
+  'You may be given "field01" — someone played the arcade retelling of the founding story today. You may reference it in at most ONE line when natural ("the old story got re-run today"); it is theater about theater, never a fact.',
 ].join(' ');
 
 let directorBusy = false, directorCd = 25, beatQueue = [], beatClock = 0;
@@ -855,6 +857,7 @@ function buildDirectorState() {
     foundPalette: Object.keys(FOUND_PALETTE).filter(id => !world.foundations.some(f => f.id === id)),
     news: Object.entries(news).map(([id, n]) => ({ id, title: n.title.slice(0, 90), points: n.points, cls: n.cls })),
     interventions: interventions.slice(-5),
+    ...(field01Today ? { field01: { won: !!field01Today.won, keys: field01Today.keys | 0, score: field01Today.score | 0 } } : {}), // field 01 × the world — today only, else absent
   };
 }
 /* validate hard: only known ids/actions survive; unknown → drop that beat, keep
@@ -918,6 +921,7 @@ function beatSentence(en) {
   let s;
   switch (en.do) {
     case 'curtain': return 'curtain — “' + (en.line || '') + '”';
+    case 'field01': return 'someone played the old story — ' + (en.line || '');
     case 'poster': return en.who + ' raises a poster — “' + (en.poster || '') + '”';
     case 'found': return en.who + ' founds “' + (en.line || '') + '” (' + en.to + ')';
     case 'goto': s = en.who + (tgt ? ' heads to ' + tgt : ' heads out'); break;
@@ -950,6 +954,24 @@ function fillPlaybill(el) {
 }
 function renderPlaybill() { const el = document.getElementById('playbill'); if (el && el.style.display === 'block') fillPlaybill(el); }
 function updateStoryLink() { const el = document.getElementById('storyline'); if (el) el.style.display = world.episode ? 'block' : 'none'; }
+/* ---------------- field 01 × the world (the frozen contract) ----------------
+   the game writes ct_field01_v1 at every run end; the world reads it at boot
+   and every 60s (storage events don't fire same-tab). today's run enters the
+   story as theater — one chronicle line, one playbill beat, a narrator line,
+   at most one director mention. acknowledged exactly once per ts; absent or
+   malformed → nothing changes (fail-soft law). */
+let field01Today = null; // today's run record, kept in memory for narrator + director
+function checkField01() {
+  let rec = null;
+  try { rec = JSON.parse(localStorage.getItem('ct_field01_v1') || 'null'); } catch (e) { rec = null; }
+  if (!rec || typeof rec !== 'object' || typeof rec.ts !== 'number' || typeof rec.day !== 'number') return;
+  if (rec.day !== worldDay) return; // yesterday's run is yesterday's story
+  if (rec.ts <= (world.field01AckTs || 0)) { field01Today = field01Today || rec; return; } // already announced — keep it after a reload, quietly
+  world.field01AckTs = rec.ts; saveWorld(); // acknowledge exactly once
+  field01Today = rec;
+  chronicle('the vault run was played — ' + (rec.won ? 'won, three keys home' : 'the regulator won'));
+  playbillAdd({ a: actInfo().roman, who: '', do: 'field01', to: null, line: rec.won ? 'the vault run — won' : 'the vault run — the regulator won', poster: null });
+}
 /* §15b — arrivals mean the place: a beat's landmark gets its gesture */
 const GESTURE_OF = { archive: 'book', tower: 'brow', bench: 'crouch', vault: 'touch', frontier: 'brow', garden: 'crouch', signpost: 'brow', bench2: 'crouch', vane: 'brow', board: 'brow', pond: 'sit' };
 function gesture(e, at) {
@@ -1894,6 +1916,7 @@ function narratorText() {
   if (walker) items.push(walker.id + ' is ' + stateWord(walker) + '.');
   const recurring = Object.values(world.census || {}).filter(c => (c.days || []).length >= 3); // §8 — a lab that keeps coming up
   if (recurring.length) items.push('the census says ' + recurring[Math.floor(Date.now() / 11000) % recurring.length].name.toLowerCase() + ' keeps coming up.');
+  if (field01Today) items.push(field01Today.won ? 'someone ran field 01 today. three keys. the vault opened.' : 'someone ran field 01 today. the regulator won.');
   if (!items.length) return 'a quiet day in continuum.';
   return items[Math.floor(Date.now() / 9000) % items.length];
 }
@@ -2388,4 +2411,5 @@ announce('continuum — day ' + worldDay, world.visits > 1 ? 'welcome back.' : '
 renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000);
 tryOllama(); fetchNews(); setInterval(fetchNews, 10 * 60 * 1000);
 researchSweep(); setInterval(researchSweep, 30 * 60 * 1000); // §8 — perplexity's model census
+checkField01(); setInterval(checkField01, 60 * 1000); // field 01 × the world — the game reports in, the world takes note once
 requestAnimationFrame(loop);
