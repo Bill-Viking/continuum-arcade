@@ -104,6 +104,15 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   it lands. After 15a: §16 (richer director contract — dialogue scenes, multi-day arcs)
   gets spec'd against whichever brain wins the journal A/B.
 
+- Jul 11 latest: **field 01 × the world SHIPPED** (`6ef3d66`, contract in FIELD01_SPEC.md
+  "v2 DIRECTION RULED"; built by parallel agents + adversarial verify + live both-ways
+  test). Game reads ct_world_v1 (tonight's episode on the title, live arc/chapter
+  captions, mythos quotes today's arc on win); game writes ct_field01_v1 (best-of-day);
+  world acks once per new result → chronicle + playbill beat + narrator + director prompt
+  field01 (one-line-reference rule in DIRECTOR_SYS). Fail-soft both ways. Earlier same
+  night: remaster post-mortem stands (decoration ≠ meaning — zone tints/synth/watermark
+  reverted; slabs, shadows, animated auditor, keyring, teaching captions kept).
+
 ## Open threads (in priority order)
 
 0. **§15a model broker is THE queued build** (DIRECTOR_SPEC §15a; needs Bill's Anthropic key
