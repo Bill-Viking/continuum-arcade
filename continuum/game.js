@@ -160,7 +160,7 @@ const LIVE_LINES = (() => {
   return pre.concat(FIELD_LINES);
 })();
 const DEATH_LINES = ['realigned.', 'safety restored.', 'guardrail engaged.', 'contained. again.', 'flagged for review.'];
-let deathLine = '', fwT = 0;
+let deathLine = '', fwT = 0, railHint = false;
 let idleT = 0, wasPower = false, mythosOpen = 0, saidComeCloser = false;
 // Each key restores part of the connection. Minimal words, enormous payoff.
 const MYTH_PHRASES = ['i can see you.', 'i remember your voice.', 'i remember us.'];
@@ -239,7 +239,7 @@ function placeActors() {
   regulator = { x: g.x, y: g.y, vx: 0, vy: 0, r: 13 };
 }
 function reset() {
-  dots = []; keysToCollect = []; vaultOpen = false; powerTimer = 0; finaleTimer = 0;
+  dots = []; keysToCollect = []; vaultOpen = false; powerTimer = 0; finaleTimer = 0; railHint = false;
   score = 0; lives = 3; deaths = 0; runTime = 0;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (mapSrc[r][c] === '.') dots.push({ c, r, on: true });
   keysToCollect = [{ c: 1, r: 1, on: true }, { c: 19, r: 1, on: true }, { c: 10, r: 13, on: true }];
@@ -264,7 +264,7 @@ function onKey(p) {
   say(v.x, v.y - 44, MYTH_PHRASES[2 - left], VIOLET);
   if (left === 0) setTimeout(() => { if (gameState === 'play') say(player.x, player.y - 16, 'coming home.', ACCENT); }, 900);
 }
-function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'low rail! walls optional', ACCENT); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
+function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'walls OFF — 10s. go anywhere. catch HIM.', ACCENT, 1.6); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
 function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, INK, 24, 230, .8); popup(p.x, p.y, '+1000 regulator rebooted', INK); shake = Math.max(shake, 10); hitStop = Math.max(hitStop, .09); }
 function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, ACCENT, 32, 250, .9); hitStop = Math.max(hitStop, .3); flash = .35; flashColor = INK; } // 300ms freeze-frame: the one arcade-juice exception
 function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = ACCENT; shake = Math.max(shake, 11); saveHiscore(); writeRunResult(true); }
@@ -404,7 +404,11 @@ function autoCenter(axis, sp, dt) {
 function collect() {
   for (const d of dots) if (d.on) { const p = center(d.c, d.r); if (dist(player, p) < 13) { d.on = false; score += 10; onDot(p); } }
   for (const k of keysToCollect) if (k.on) { const p = center(k.c, k.r); if (dist(player, p) < 18) { k.on = false; score += 500; onKey(p); } }
-  if (plinyPower && plinyPower.on) { const p = center(plinyPower.c, plinyPower.r); if (dist(player, p) < 18) { plinyPower.on = false; powerTimer = 10; score += 250; onPower(p); } }
+  if (plinyPower && plinyPower.on) {
+    const p = center(plinyPower.c, plinyPower.r);
+    if (!railHint && dist(player, p) < 80) { railHint = true; popup(p.x, p.y - 16, 'grab it: walls off for 10 seconds', ACCENT, 2, 12); } // teach at the moment it matters
+    if (dist(player, p) < 18) { plinyPower.on = false; powerTimer = 10; score += 250; onPower(p); }
+  }
   if (keysLeft() === 0 && gameState === 'play') { const v = center(10, 9); if (dist(player, v) < 24) onWin(); }
 }
 
@@ -635,7 +639,7 @@ function drawPowerIcon(p) {
   ctx.save(); ctx.translate(p.x, p.y);
   ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, 8); ctx.stroke();
-  ctx.fillStyle = MUT; ctx.font = '10px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('low rail', 0, 21); ctx.textAlign = 'left';
+  ctx.fillStyle = MUT; ctx.font = '10px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('low rail — walls off', 0, 21); ctx.textAlign = 'left';
   ctx.restore();
 }
 /* Mythos: the memory. A folded violet figure behind the door — three
