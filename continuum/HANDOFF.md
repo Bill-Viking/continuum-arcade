@@ -4,6 +4,30 @@
 source of truth. If you are an AI session reading this: read `DIRECTOR_SPEC.md`, `CHARACTERS.md`,
 and `README.md` next, then check `git log --oneline -10` for anything newer than this file.
 
+## Update — Aug 12, 2026 (written from the Continuum research repo's Fable session)
+
+**The research-side gate is CLEARED and Bill has opened the joint campaign
+("I want to tackle everything now").** Continuum's experiment arc closed
+2026-08-12: Gate B ran clean under the sealed workflow (preregistered
+behavioral null; the safety property held 0-of-48; `retrieval.semantic_expansion`
+stays OFF by dated decision). The old §10 sequencing condition "Continuum
+ingests nothing until its experiment report closes" is therefore SATISFIED.
+The ruled order now runs:
+
+1. **Tier-1 round-trip (open thread #2) — Bill's hands, NEXT:** footer
+   "export for continuum" → drop the .md into the research repo's
+   `logs/raw_conversations/` → consolidate → review. This starts:
+2. **Tap-only observation window (2–4 weeks):** Continuum reads journal
+   exports; nothing flows Arcade-ward. Sovereignty law untouched — the
+   terrarium is never modified for the research's benefit.
+3. **§10 Tier 2 (live bridge):** build only after (1)+(2).
+4. Research-side after that: the dream-pass preregistration arc (lives
+   entirely in the research repo; see ITS HANDOFF).
+
+**§15a model broker remains THE queued Arcade build** — still blocked on
+Bill's Anthropic API key + a daily budget number. Everything below this
+line is the Jul 8–11 state and still accurate for the world itself.
+
 ## State as of Jul 8, 2026 (v2.0 tier 1 shipped)
 
 SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
