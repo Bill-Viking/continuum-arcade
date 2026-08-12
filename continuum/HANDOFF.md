@@ -14,12 +14,17 @@ stays OFF by dated decision). The old §10 sequencing condition "Continuum
 ingests nothing until its experiment report closes" is therefore SATISFIED.
 The ruled order now runs:
 
-1. **Tier-1 round-trip (open thread #2) — Bill's hands, NEXT:** footer
-   "export for continuum" → drop the .md into the research repo's
-   `logs/raw_conversations/` → consolidate → review. This starts:
-2. **Tap-only observation window (2–4 weeks):** Continuum reads journal
-   exports; nothing flows Arcade-ward. Sovereignty law untouched — the
-   terrarium is never modified for the research's benefit.
+1. **Tier-1 round-trip — DONE 2026-08-12, Bill's hands.** Export →
+   `logs/raw_conversations/terrarium_journal_2026-08-12.md` → import at
+   console restart → consolidation read the event and correctly
+   proposed nothing (one fiction-layer beat; sleep report on file in
+   the research repo). Open thread #2 CLOSED; ruling 6's "one manual
+   round trip" satisfied. This started:
+2. **Tap-only observation window — OPEN as of 2026-08-12 (runs to
+   ~Aug 26–Sep 9):** Continuum reads journal exports; nothing flows
+   Arcade-ward. Sovereignty law untouched — the terrarium is never
+   modified for the research's benefit. During the window the terrarium
+   just runs as art; Bill drops an export every few days.
 3. **§10 Tier 2 (live bridge):** build only after (1)+(2).
 4. Research-side after that: the dream-pass preregistration arc (lives
    entirely in the research repo; see ITS HANDOFF).
