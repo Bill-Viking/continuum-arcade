@@ -29,6 +29,14 @@ The ruled order now runs:
 4. Research-side after that: the dream-pass preregistration arc (lives
    entirely in the research repo; see ITS HANDOFF).
 
+**Aug 12 later: the "mind console ↗" footer door SHIPPED** (Bill's ask:
+navigation doors between the two apps — doors yes, plumbing no). One
+static anchor to http://localhost:8765/ beneath #journallinks, styled on
+the #storyline pattern; no JS, no status check, no polling — dead when
+the console is down, by design. world.js untouched (?v=13 kept; index
+.html is no-cache). The research repo gained the mirror door + a
+combined Desktop launcher the same evening (see ITS HANDOFF).
+
 **§15a model broker remains THE queued Arcade build** — still blocked on
 Bill's Anthropic API key + a daily budget number. Everything below this
 line is the Jul 8–11 state and still accurate for the world itself.

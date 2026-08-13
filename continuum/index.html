@@ -40,6 +40,12 @@
   #journallinks{display:none;margin-top:12px;font-size:11px;color:var(--faint)}
   #journallinks a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
   #journallinks a:hover{color:var(--ink)}
+  /* the door to continuum's mind console — a nav link and nothing else. it is
+     dead when the console isn't running, and that is correct: the terrarium
+     never checks, polls, or monitors anything. */
+  #consolelink{margin-top:12px;font-size:12px}
+  #consolelink a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #consolelink a:hover{color:var(--ink)} #consolelink i{color:var(--accent);font-style:normal}
   /* §15b — the playbill: the day's story, readable at any moment. violet-coded —
      the memory/story color, mythos's side of the palette. */
   #storyline{display:none;margin-top:12px;font-size:12px}
@@ -97,6 +103,7 @@
     <div id="askpanel"></div>
     <div id="wiredetail"></div>
     <div id="journallinks">the director's journal — evidence about the fiction layer, nothing more: <a href="#" id="dljournal">download journal</a> · <a href="#" id="dlcontinuum">export for continuum</a></div>
+    <div id="consolelink"><a href="http://localhost:8765/" target="_blank" rel="noopener">mind console <i>↗</i></a></div>
   </footer>
 </div>
 <script src="world.js?v=13"></script>
