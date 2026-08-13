@@ -37,6 +37,21 @@ the console is down, by design. world.js untouched (?v=13 kept; index
 .html is no-cache). The research repo gained the mirror door + a
 combined Desktop launcher the same evening (see ITS HANDOFF).
 
+**Aug 12 latest: the export door promoted to a people-facing card**
+(Bill: "the export to continuum needs to be a lot more visible — these
+are people that will use it"). The footer's continuum-facing cluster is
+now ONE accent-ruled card (#continuumdoor, geometry copied from
+#askpanel/#playbill): journal explainer → "export for continuum ›" as
+the primary door with a plain-language line ("nothing is sent anywhere —
+a file downloads … you carry it over yourself") → "download journal"
+secondary → "mind console ↗" with a clause saying it reads the export.
+ALWAYS VISIBLE now: journal.length toggles ready/empty CLASSES instead
+of display:none — the empty state greys the door and says honestly
+"nothing to export yet … a local model has to be running." Export code
+path byte-identical; handlers unchanged; ?v=13 → 14. The research-side
+counterpart (a file-picker import, no folder knowledge needed) landed
+the same night in the research repo.
+
 **§15a model broker remains THE queued Arcade build** — still blocked on
 Bill's Anthropic API key + a daily budget number. Everything below this
 line is the Jul 8–11 state and still accurate for the world itself.

@@ -36,14 +36,35 @@
   #wiredetail a i{color:var(--accent);font-style:normal}
   /* a generated plain-words gloss: theater, not fact — never linked, always marked */
   #wiredetail .gloss{color:var(--faint);font-style:italic}
-  /* §10 — the journal's two doors: theater layer, quiet, only there once entries exist */
-  #journallinks{display:none;margin-top:12px;font-size:11px;color:var(--faint)}
-  #journallinks a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
-  #journallinks a:hover{color:var(--ink)}
+  /* §10 — the journal's doors, promoted 2026-08-12 (Bill: "the export to continuum
+     needs to be a lot more visible — these are people that will use it"). one ruled
+     block holds the whole continuum-facing cluster: the journal, the export, the
+     console it is carried to. no new visual language — the block is the page's
+     existing explain-panel geometry (#askpanel/#playbill), the accent left rule is
+     the house accent used once, and the export wears the header .sub door treatment. */
+  #continuumdoor{margin-top:14px;border:1px solid var(--hair);border-left:2px solid var(--accent);
+                 padding:14px 18px;font-size:13px;color:var(--mut);max-width:680px;line-height:1.7}
+  #continuumdoor b{color:var(--ink)}
+  #journallinks{margin-top:10px}
+  #journallinks .door{display:inline-block;font-size:15px;font-weight:600;color:var(--ink);
+                      text-decoration:none;border-bottom:1px solid var(--hair)}
+  #journallinks .door:hover{border-bottom-color:var(--ink)}
+  #journallinks .door i{color:var(--accent);font-style:normal}
+  #journallinks .say{display:block;margin-top:5px}
+  #journallinks .alt{display:block;margin-top:9px;color:var(--faint)}
+  #journallinks .alt a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #journallinks .alt a:hover{color:var(--ink)}
+  /* nothing journaled yet: the door is still explained, just not openable —
+     legible beats hidden. same signal as before (journal.length), rendered. */
+  #journallinks .none{display:none;margin-top:9px;color:var(--faint)}
+  #journallinks.empty .door{color:var(--faint);pointer-events:none}
+  #journallinks.empty .door i{color:var(--faint)}
+  #journallinks.empty .say,#journallinks.empty .alt{display:none}
+  #journallinks.empty .none{display:block}
   /* the door to continuum's mind console — a nav link and nothing else. it is
      dead when the console isn't running, and that is correct: the terrarium
      never checks, polls, or monitors anything. */
-  #consolelink{margin-top:12px;font-size:12px}
+  #consolelink{margin-top:11px;font-size:12px;color:var(--faint)}
   #consolelink a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
   #consolelink a:hover{color:var(--ink)} #consolelink i{color:var(--accent);font-style:normal}
   /* §15b — the playbill: the day's story, readable at any moment. violet-coded —
@@ -102,10 +123,18 @@
     <div class="askrow"><span class="askmark">›</span><input id="askline" type="text" autocomplete="off" spellcheck="false" placeholder="ask the archive anything — real sources, filed by the librarian · read &lt;url&gt; · help" /></div>
     <div id="askpanel"></div>
     <div id="wiredetail"></div>
-    <div id="journallinks">the director's journal — evidence about the fiction layer, nothing more: <a href="#" id="dljournal">download journal</a> · <a href="#" id="dlcontinuum">export for continuum</a></div>
-    <div id="consolelink"><a href="http://localhost:8765/" target="_blank" rel="noopener">mind console <i>↗</i></a></div>
+    <div id="continuumdoor">
+      <b>the director's journal</b> — a record of the fiction layer: what the model directing this world proposed, and what the world performed. nothing more, and it stays in this browser.
+      <div id="journallinks" class="empty">
+        <a href="#" id="dlcontinuum" class="door">export for continuum <i>›</i></a>
+        <span class="say">the journal, bundled as evidence for the mind console to review. nothing is sent anywhere — a file downloads to this computer and you carry it over yourself.</span>
+        <span class="alt">or <a href="#" id="dljournal">download journal</a> — the same record, raw.</span>
+        <span class="none">nothing to export yet. the journal fills as the director works — a local model has to be running.</span>
+      </div>
+      <div id="consolelink"><a href="http://localhost:8765/" target="_blank" rel="noopener">mind console <i>↗</i></a> — the app that reads the export, if you have it running.</div>
+    </div>
   </footer>
 </div>
-<script src="world.js?v=13"></script>
+<script src="world.js?v=14"></script>
 </body>
 </html>

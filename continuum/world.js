@@ -577,9 +577,11 @@ async function runChapter() {
    against the importer's ENTRY_PATTERN (runtime/events.py): "## YYYY-MM-DD
    HH:MM:SS", an optional "<!-- event_id: … -->" carrying our uuid, then the
    REQUIRED "role: content" line. Bill drops the file into Continuum's
-   logs/raw_conversations/; zero continuum-side code. The links only appear
-   once entries exist — without ollama, nothing renders. */
-function updateJournalLinks() { const el = document.getElementById('journallinks'); if (el) el.style.display = journal.length ? 'block' : 'none'; }
+   logs/raw_conversations/; zero continuum-side code. Same signal as before —
+   journal.length — but since 2026-08-12 it toggles a class instead of hiding
+   the block: with no entries the door is explained and inert ('empty'), never
+   invisible. Presentation only; the handlers still guard on journal.length. */
+function updateJournalLinks() { const el = document.getElementById('journallinks'); if (el) el.className = journal.length ? 'ready' : 'empty'; }
 function downloadText(name, text, mime) {
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const a = document.createElement('a'); a.href = url; a.download = name;
